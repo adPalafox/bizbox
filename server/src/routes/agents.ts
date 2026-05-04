@@ -2852,6 +2852,7 @@ export function agentRoutes(db: Db) {
 
     const minCountParam = req.query.minCount as string | undefined;
     const minCount = minCountParam ? Math.max(0, Math.min(20, parseInt(minCountParam, 10) || 0)) : 0;
+    const agentIdFilter = req.query.agentId as string | undefined;
 
     const columns = {
       id: heartbeatRuns.id,
@@ -2872,16 +2873,17 @@ export function agentRoutes(db: Db) {
       issueId: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`.as("issueId"),
     };
 
+    const baseConditions = [
+      eq(heartbeatRuns.companyId, companyId),
+      inArray(heartbeatRuns.status, ["queued", "running"]),
+      ...(agentIdFilter ? [eq(heartbeatRuns.agentId, agentIdFilter)] : []),
+    ];
+
     const liveRuns = await db
       .select(columns)
       .from(heartbeatRuns)
       .innerJoin(agentsTable, eq(heartbeatRuns.agentId, agentsTable.id))
-      .where(
-        and(
-          eq(heartbeatRuns.companyId, companyId),
-          inArray(heartbeatRuns.status, ["queued", "running"]),
-        ),
-      )
+      .where(and(...baseConditions))
       .orderBy(desc(heartbeatRuns.createdAt));
 
     if (minCount > 0 && liveRuns.length < minCount) {
@@ -2895,6 +2897,7 @@ export function agentRoutes(db: Db) {
             eq(heartbeatRuns.companyId, companyId),
             not(inArray(heartbeatRuns.status, ["queued", "running"])),
             ...(activeIds.length > 0 ? [not(inArray(heartbeatRuns.id, activeIds))] : []),
+            ...(agentIdFilter ? [eq(heartbeatRuns.agentId, agentIdFilter)] : []),
           ),
         )
         .orderBy(desc(heartbeatRuns.createdAt))

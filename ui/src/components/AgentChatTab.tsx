@@ -57,7 +57,7 @@ export const AgentChatTab = memo(function AgentChatTab({
 
   const { data: companyLiveRuns } = useQuery({
     queryKey: [...queryKeys.heartbeats(companyId, agentId), "live"] as const,
-    queryFn: () => heartbeatsApi.liveRunsForCompany(companyId),
+    queryFn: () => heartbeatsApi.liveRunsForCompany(companyId, { agentId }),
     enabled: Boolean(companyId) && Boolean(agentId) && Boolean(threadId),
     refetchInterval: 3000,
   });
