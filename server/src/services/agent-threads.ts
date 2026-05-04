@@ -147,12 +147,14 @@ export function agentThreadService(db: Db) {
             and(
               eq(agentThreads.companyId, input.companyId),
               eq(agentThreads.id, input.threadId),
+              eq(agentThreads.status, "active"),
             ),
           )
           .limit(1);
 
         if (!thread) {
-          throw new Error("Agent thread not found");
+          // Thread archived or not found — skip gracefully
+          return null;
         }
 
         const [message] = await tx
