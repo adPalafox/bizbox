@@ -408,6 +408,18 @@ describe("agent thread routes", () => {
     });
   });
 
+  it("returns 404 when markRead finds no active thread", async () => {
+    mockAgentThreadService.markRead.mockResolvedValue(null);
+    const app = await createApp();
+
+    const res = await request(app)
+      .post(`/api/agents/${agentId}/thread/read`)
+      .send({ lastReadMessageId: messageId });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("No active thread found for this agent");
+  });
+
   it("rejects agent actors from GET thread messages with 403", async () => {
     const [{ agentRoutes }, { errorHandler }] = await Promise.all([
       vi.importActual<typeof import("../routes/agents.js")>("../routes/agents.js"),
