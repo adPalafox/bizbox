@@ -2701,6 +2701,10 @@ export function agentRoutes(db: Db) {
   });
 
   router.get("/agents/:id/thread", async (req, res) => {
+    if (req.actor.type !== "board") {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
     const id = req.params.id as string;
     const agent = await svc.getById(id);
     if (!agent) {
@@ -2752,6 +2756,10 @@ export function agentRoutes(db: Db) {
       userId: req.actor.userId!,
       lastReadMessageId: req.body.lastReadMessageId ?? null,
     });
+    if (!result) {
+      res.status(404).json({ error: "No active thread found for this agent" });
+      return;
+    }
     res.json(result);
   });
 
