@@ -2661,26 +2661,30 @@ export function agentRoutes(db: Db) {
     });
 
     const actor = getActorInfo(req);
-    await heartbeat.wakeup(agent.id, {
-      source: "on_demand",
-      triggerDetail: "manual",
-      reason: "agent_thread_message",
-      requestedByActorType: actor.actorType,
-      requestedByActorId: actor.actorId,
-      payload: {
-        agentThreadId: result.thread.id,
-        agentThreadMessageId: result.message.id,
-        agentThreadMessageBody: result.message.body,
-      },
-      contextSnapshot: {
-        wakeReason: "agent_thread_message",
-        agentThreadId: result.thread.id,
-        agentThreadMessageId: result.message.id,
-        agentThreadMessageBody: result.message.body,
-        taskKey: `agent-thread:${result.thread.id}`,
-        forceFreshSession: false,
-      },
-    });
+    try {
+      await heartbeat.wakeup(agent.id, {
+        source: "on_demand",
+        triggerDetail: "manual",
+        reason: "agent_thread_message",
+        requestedByActorType: actor.actorType,
+        requestedByActorId: actor.actorId,
+        payload: {
+          agentThreadId: result.thread.id,
+          agentThreadMessageId: result.message.id,
+          agentThreadMessageBody: result.message.body,
+        },
+        contextSnapshot: {
+          wakeReason: "agent_thread_message",
+          agentThreadId: result.thread.id,
+          agentThreadMessageId: result.message.id,
+          agentThreadMessageBody: result.message.body,
+          taskKey: `agent-thread:${result.thread.id}`,
+          forceFreshSession: false,
+        },
+      });
+    } catch (err) {
+      console.error("[agent-thread] wakeup failed:", err);
+    }
 
     await logActivity(db, {
       companyId: agent.companyId,
@@ -2865,6 +2869,10 @@ export function agentRoutes(db: Db) {
     const minCountParam = req.query.minCount as string | undefined;
     const minCount = minCountParam ? Math.max(0, Math.min(20, parseInt(minCountParam, 10) || 0)) : 0;
     const agentIdFilter = req.query.agentId as string | undefined;
+    if (agentIdFilter && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(agentIdFilter)) {
+      res.status(400).json({ error: "Invalid agentId" });
+      return;
+    }
 
     const columns = {
       id: heartbeatRuns.id,
