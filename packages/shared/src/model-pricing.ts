@@ -4,6 +4,13 @@
  * Prices are per 1M tokens in USD cents (multiply by 100).
  * Update this table when provider pricing changes or new models are added.
  * 
+ * **OPERATIONAL NOTE:**
+ * This table uses exact model version strings (e.g. "gpt-4o-2024-11-20").
+ * When providers release new model variants, operators configuring those models
+ * in the Builder will receive an "unprocessable" error until this file is updated
+ * and deployed. Consider adding a PRICING_OVERRIDE env-var or DB-backed override
+ * mechanism to allow operators to unblock themselves without a redeploy.
+ * 
  * Sources:
  * - OpenAI: https://openai.com/api/pricing/
  * - Anthropic: https://www.anthropic.com/pricing

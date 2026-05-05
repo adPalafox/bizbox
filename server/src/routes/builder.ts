@@ -11,6 +11,7 @@ import { validate } from "../middleware/validate.js";
 import { builderService } from "../services/builder/index.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 import { logActivity } from "../services/activity-log.js";
+import { logger } from "../middleware/logger.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import { forbidden, notFound } from "../errors.js";
 
@@ -290,8 +291,9 @@ export function builderRoutes(db: Db) {
           truncated: result.truncated,
           messageCount: result.newMessages.length,
         });
+        // Best-effort activity log — never fail the SSE turn because of logging
         const actor = getActorInfo(req);
-        await logActivity(db, {
+        logActivity(db, {
           companyId,
           actorType: actor.actorType,
           actorId: actor.actorId,
@@ -307,7 +309,9 @@ export function builderRoutes(db: Db) {
             newMessageCount: result.newMessages.length,
             stream: true,
           },
-        });
+        }).catch((logErr) =>
+          logger.warn({ logErr, sessionId }, "builder stream: activity log failed"),
+        );
       } catch (err) {
         send("error", {
           error: err instanceof Error ? err.message : "Builder run failed",
