@@ -77,7 +77,9 @@ function trimTranscriptForProvider(
   persisted: PersistedBuilderMessage[],
 ): PersistedBuilderMessage[] {
   if (persisted.length <= BUILDER_MAX_TRANSCRIPT_MESSAGES) return persisted;
-  return persisted.slice(-BUILDER_MAX_TRANSCRIPT_MESSAGES);
+  const tail = persisted.slice(-BUILDER_MAX_TRANSCRIPT_MESSAGES);
+  const firstUserIdx = tail.findIndex((message) => message.role === "user");
+  return firstUserIdx > 0 ? tail.slice(firstUserIdx) : tail;
 }
 
 /**

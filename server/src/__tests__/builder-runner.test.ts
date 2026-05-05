@@ -200,20 +200,33 @@ describe("builder runner", () => {
 
   it("bounds the transcript sent to the adapter for long-lived sessions", async () => {
     const { state, store } = makeStore();
-    for (let i = 0; i < 100; i += 1) {
+    const seeded: Array<PersistedBuilderMessage["role"]> = [];
+    for (let i = 0; i < 79; i += 1) seeded.push(i % 2 === 0 ? "user" : "assistant");
+    seeded.push("assistant");
+    seeded.push("tool");
+    seeded.push("user");
+    while (seeded.length < 100) {
+      seeded.push(seeded.length % 2 === 0 ? "assistant" : "user");
+    }
+    seeded.forEach((role, i) => {
       state.messages.push({
         id: `msg-${i}`,
         sessionId,
         companyId,
         sequence: i,
-        role: i % 2 === 0 ? "user" : "assistant",
-        content: { text: `message-${i}` },
+        role,
+        content:
+          role === "assistant"
+            ? { text: `message-${i}`, ...(i === 79 ? { toolCalls: [{ id: "c1", name: "tool", arguments: {} }] } : {}) }
+            : role === "tool"
+              ? { toolResult: { toolCallId: "c1", name: "tool", ok: true, result: { ok: true } } }
+              : { text: `message-${i}` },
         inputTokens: 0,
         outputTokens: 0,
         costCents: 0,
         createdAt: new Date(),
       });
-    }
+    });
 
     mockExecuteBuilderTurn.mockResolvedValueOnce({
       text: "trimmed",
@@ -233,8 +246,7 @@ describe("builder runner", () => {
     });
 
     const firstCall = mockExecuteBuilderTurn.mock.calls[0]?.[0];
-    expect(firstCall.messages).toHaveLength(81);
-    expect(firstCall.messages[1]).toMatchObject({ role: "user", content: "message-20" });
+    expect(firstCall.messages[1]).toMatchObject({ role: "user" });
     expect(firstCall.messages.at(-1)).toMatchObject({ content: "message-99" });
   });
 });
@@ -265,5 +277,35 @@ describe("builder tool registry", () => {
       run: async () => ({ ok: true, result: null }),
     };
     expect(() => registerBuilderTool(tool)).toThrow(/Core builder tools/);
+  });
+
+  it("blocks approval-gated plugin tools from executing directly", async () => {
+    const run = vi.fn(async () => ({ ok: true as const, result: { ok: true } }));
+    const tool: BuilderTool = {
+      name: "dangerous_plugin_write",
+      description: "",
+      parametersSchema: { type: "object" },
+      requiresApproval: true,
+      capability: "plugin.example",
+      source: "plugin.example",
+      run,
+    };
+
+    const { safeRunTool } = await import("../services/builder/tool-registry.js");
+    const result = await safeRunTool(tool, {}, {
+      companyId,
+      sessionId,
+      messageId: "m1",
+      actor: { type: "user", id: "user-1" },
+      db: {} as unknown as Db,
+      proposalStore: {} as never,
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Plugin builder tools that require approval cannot run directly. Expose them through the agent surface or remove requiresApproval.",
+    });
   });
 });

@@ -110,6 +110,13 @@ export async function safeRunTool(
   ctx: BuilderToolRunContext,
 ): Promise<BuilderToolRunResult> {
   try {
+    if (tool.requiresApproval && tool.source.startsWith("plugin.")) {
+      return {
+        ok: false,
+        error:
+          "Plugin builder tools that require approval cannot run directly. Expose them through the agent surface or remove requiresApproval.",
+      };
+    }
     return await tool.run(params, ctx);
   } catch (err) {
     return {
