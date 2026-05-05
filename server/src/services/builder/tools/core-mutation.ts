@@ -8,6 +8,7 @@ import {
   routineService,
 } from "../../index.js";
 import { logActivity } from "../../activity-log.js";
+import { logger } from "../../../middleware/logger.js";
 import type { BuilderTool } from "../types.js";
 import { defineMutationTool } from "./mutation-tool.js";
 
@@ -113,7 +114,14 @@ const createRoutine: BuilderTool = defineMutationTool({
       },
       { userId: ctx.decidedByUserId, agentId: null },
     );
-    await logActivity(ctx.db, {
+    const result = {
+      summary: `Routine "${created.title}" created`,
+      entityId: created.id,
+      entityType: "routine",
+      details: { id: created.id, title: created.title },
+    };
+    // Best-effort activity log — never fail the apply because of logging
+    logActivity(ctx.db, {
       companyId: ctx.companyId,
       actorType: "user",
       actorId: ctx.decidedByUserId ?? "board",
@@ -125,13 +133,10 @@ const createRoutine: BuilderTool = defineMutationTool({
         title: created.title,
         viaProposalKind: "create_routine",
       },
-    });
-    return {
-      summary: `Routine "${created.title}" created`,
-      entityId: created.id,
-      entityType: "routine",
-      details: { id: created.id, title: created.title },
-    };
+    }).catch((logErr) =>
+      logger.warn({ logErr, routineId: created.id }, "create_routine: activity log failed"),
+    );
+    return result;
   },
 });
 
@@ -189,7 +194,13 @@ const updateRoutine: BuilderTool = defineMutationTool({
       { userId: ctx.decidedByUserId, agentId: null },
     );
     if (!updated) throw new Error("Routine not found");
-    await logActivity(ctx.db, {
+    const result = {
+      summary: `Routine ${updated.id} updated`,
+      entityId: updated.id,
+      entityType: "routine",
+    };
+    // Best-effort activity log — never fail the apply because of logging
+    logActivity(ctx.db, {
       companyId: ctx.companyId,
       actorType: "user",
       actorId: ctx.decidedByUserId ?? "board",
@@ -197,12 +208,10 @@ const updateRoutine: BuilderTool = defineMutationTool({
       entityType: "routine",
       entityId: updated.id,
       details: { source: "builder", patch: payload.patch },
-    });
-    return {
-      summary: `Routine ${updated.id} updated`,
-      entityId: updated.id,
-      entityType: "routine",
-    };
+    }).catch((logErr) =>
+      logger.warn({ logErr, routineId: updated.id }, "update_routine: activity log failed"),
+    );
+    return result;
   },
 });
 
@@ -250,7 +259,9 @@ const createGoal: BuilderTool = defineMutationTool({
       parentId: (payload.parentId as string | null) ?? null,
     });
     if (!created) throw new Error("Goal creation returned no row");
-    await logActivity(ctx.db, {
+    const result = { summary: `Goal "${created.title}" created`, entityId: created.id, entityType: "goal" };
+    // Best-effort activity log — never fail the apply because of logging
+    logActivity(ctx.db, {
       companyId: ctx.companyId,
       actorType: "user",
       actorId: ctx.decidedByUserId ?? "board",
@@ -258,8 +269,10 @@ const createGoal: BuilderTool = defineMutationTool({
       entityType: "goal",
       entityId: created.id,
       details: { source: "builder", title: created.title },
-    });
-    return { summary: `Goal "${created.title}" created`, entityId: created.id, entityType: "goal" };
+    }).catch((logErr) =>
+      logger.warn({ logErr, goalId: created.id }, "create_goal: activity log failed"),
+    );
+    return result;
   },
 });
 
@@ -304,7 +317,9 @@ const updateGoal: BuilderTool = defineMutationTool({
       payload.patch as Record<string, unknown>,
     );
     if (!updated) throw new Error("Goal not found");
-    await logActivity(ctx.db, {
+    const result = { summary: `Goal ${updated.id} updated`, entityId: updated.id, entityType: "goal" };
+    // Best-effort activity log — never fail the apply because of logging
+    logActivity(ctx.db, {
       companyId: ctx.companyId,
       actorType: "user",
       actorId: ctx.decidedByUserId ?? "board",
@@ -312,8 +327,10 @@ const updateGoal: BuilderTool = defineMutationTool({
       entityType: "goal",
       entityId: updated.id,
       details: { source: "builder", patch: payload.patch },
-    });
-    return { summary: `Goal ${updated.id} updated`, entityId: updated.id, entityType: "goal" };
+    }).catch((logErr) =>
+      logger.warn({ logErr, goalId: updated.id }, "update_goal: activity log failed"),
+    );
+    return result;
   },
 });
 
@@ -377,7 +394,13 @@ const createIssue: BuilderTool = defineMutationTool({
     } as Parameters<ReturnType<typeof issueService>["create"]>[1]);
     if (!created) throw new Error("Issue creation returned no row");
     const issueRow = created as { id: string; title: string };
-    await logActivity(ctx.db, {
+    const result = {
+      summary: `Issue "${issueRow.title}" created`,
+      entityId: issueRow.id,
+      entityType: "issue",
+    };
+    // Best-effort activity log — never fail the apply because of logging
+    logActivity(ctx.db, {
       companyId: ctx.companyId,
       actorType: "user",
       actorId: ctx.decidedByUserId ?? "board",
@@ -385,12 +408,10 @@ const createIssue: BuilderTool = defineMutationTool({
       entityType: "issue",
       entityId: issueRow.id,
       details: { source: "builder", title: issueRow.title },
-    });
-    return {
-      summary: `Issue "${issueRow.title}" created`,
-      entityId: issueRow.id,
-      entityType: "issue",
-    };
+    }).catch((logErr) =>
+      logger.warn({ logErr, issueId: issueRow.id }, "create_issue: activity log failed"),
+    );
+    return result;
   },
 });
 
@@ -449,7 +470,9 @@ const updateIssue: BuilderTool = defineMutationTool({
       { actorType: "user", userId: ctx.decidedByUserId, agentId: null } as never,
     )) as { id: string } | null;
     if (!result) throw new Error("Issue not found");
-    await logActivity(ctx.db, {
+    const returnValue = { summary: `Issue ${result.id} updated`, entityId: result.id, entityType: "issue" };
+    // Best-effort activity log — never fail the apply because of logging
+    logActivity(ctx.db, {
       companyId: ctx.companyId,
       actorType: "user",
       actorId: ctx.decidedByUserId ?? "board",
@@ -457,8 +480,10 @@ const updateIssue: BuilderTool = defineMutationTool({
       entityType: "issue",
       entityId: result.id,
       details: { source: "builder", patch: payload.patch },
-    });
-    return { summary: `Issue ${result.id} updated`, entityId: result.id, entityType: "issue" };
+    }).catch((logErr) =>
+      logger.warn({ logErr, issueId: result.id }, "update_issue: activity log failed"),
+    );
+    return returnValue;
   },
 });
 

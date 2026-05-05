@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { builderProposals } from "@paperclipai/db";
 import type {
@@ -113,7 +113,15 @@ export function builderProposalStore(db: Db) {
           updatedAt: new Date(),
           failureReason: null,
         })
-        .where(eq(builderProposals.id, proposalId))
+        .where(
+          and(
+            eq(builderProposals.id, proposalId),
+            or(
+              eq(builderProposals.status, "pending"),
+              eq(builderProposals.status, "approved"),
+            ),
+          ),
+        )
         .returning();
       return row ? toProposal(row) : null;
     },
@@ -130,7 +138,15 @@ export function builderProposalStore(db: Db) {
           decidedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(builderProposals.id, proposalId))
+        .where(
+          and(
+            eq(builderProposals.id, proposalId),
+            or(
+              eq(builderProposals.status, "pending"),
+              eq(builderProposals.status, "approved"),
+            ),
+          ),
+        )
         .returning();
       return row ? toProposal(row) : null;
     },
@@ -149,7 +165,15 @@ export function builderProposalStore(db: Db) {
           failureReason,
           updatedAt: new Date(),
         })
-        .where(eq(builderProposals.id, proposalId))
+        .where(
+          and(
+            eq(builderProposals.id, proposalId),
+            or(
+              eq(builderProposals.status, "pending"),
+              eq(builderProposals.status, "approved"),
+            ),
+          ),
+        )
         .returning();
       return row ? toProposal(row) : null;
     },
