@@ -94,6 +94,11 @@ export function builderService(db: Db) {
       if (!config) {
         throw unprocessable("Builder is not configured for this company");
       }
+      if (!hasModelPricing(config.model)) {
+        throw unprocessable(
+          `Model "${config.model}" is not recognized. Budget hard-stop requires a known model. Update provider settings to a supported model variant.`,
+        );
+      }
       const apiKey = await settings.resolveApiKey(input.companyId);
       if (!apiKey) {
         throw unprocessable(

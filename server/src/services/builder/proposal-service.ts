@@ -59,14 +59,26 @@ export function proposalService(db: Db) {
       };
 
       try {
-        const result = await tool.apply(proposal.payload, ctx);
-        const applied = await store.markApplied(proposalId, decidedByUserId, null);
+        // Wrap tool.apply() and markApplied() in a transaction to prevent orphaned entities
+        const { applied, result } = await db.transaction(async (tx) => {
+          // Tool appliers use ctx.db which is the outer db, not tx
+          // This means the entity creation is part of the transaction scope
+          const result = await tool.apply(proposal.payload, { ...ctx, db: tx as any });
+          const applied = await store.markApplied(proposalId, decidedByUserId, null);
+          if (!applied) {
+            // Another concurrent apply already won — treat as idempotent success by
+            // re-fetching the now-applied proposal so the caller gets a real value.
+            const current = await store.getById(companyId, proposalId);
+            return { applied: current, result };
+          }
+          return { applied, result };
+        });
+        
         if (!applied) {
-          // Another concurrent apply already won — treat as idempotent success by
-          // re-fetching the now-applied proposal so the caller gets a real value.
-          const current = await store.getById(companyId, proposalId);
-          return current;
+          // Concurrent race case - return the re-fetched proposal
+          return applied;
         }
+        
         // Best-effort activity log — never fail the apply because of logging
         await logActivity(db, {
           companyId,
