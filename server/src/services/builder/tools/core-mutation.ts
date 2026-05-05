@@ -4,6 +4,7 @@ import {
   companyService,
   goalService,
   issueService,
+  projectService,
   routineService,
 } from "../../index.js";
 import { logActivity } from "../../activity-log.js";
@@ -77,6 +78,19 @@ const createRoutine: BuilderTool = defineMutationTool({
     )})`;
   },
   async apply(payload, ctx) {
+    // Verify foreign key ownership to prevent cross-company references
+    if (payload.goalId) {
+      const goal = await goalService(ctx.db).getById(String(payload.goalId));
+      if (!goal || goal.companyId !== ctx.companyId) {
+        throw new Error("Goal not found");
+      }
+    }
+    if (payload.projectId) {
+      const project = await projectService(ctx.db).getById(String(payload.projectId));
+      if (!project || project.companyId !== ctx.companyId) {
+        throw new Error("Project not found");
+      }
+    }
     const created = await routineService(ctx.db).create(
       ctx.companyId,
       {
@@ -207,6 +221,13 @@ const createGoal: BuilderTool = defineMutationTool({
     return `Create ${String(payload.level)} goal "${String(payload.title)}"`;
   },
   async apply(payload, ctx) {
+    // Verify parent goal ownership to prevent cross-company references
+    if (payload.parentId) {
+      const parent = await goalService(ctx.db).getById(String(payload.parentId));
+      if (!parent || parent.companyId !== ctx.companyId) {
+        throw new Error("Parent goal not found");
+      }
+    }
     const created = await goalService(ctx.db).create(ctx.companyId, {
       title: String(payload.title),
       description: (payload.description as string | null) ?? null,
@@ -317,6 +338,13 @@ const createIssue: BuilderTool = defineMutationTool({
     return `Create issue "${String(payload.title)}" (${String(payload.status)})`;
   },
   async apply(payload, ctx) {
+    // Verify project ownership to prevent cross-company references
+    if (payload.projectId) {
+      const project = await projectService(ctx.db).getById(String(payload.projectId));
+      if (!project || project.companyId !== ctx.companyId) {
+        throw new Error("Project not found");
+      }
+    }
     const created = await issueService(ctx.db).create(ctx.companyId, {
       title: String(payload.title),
       description: (payload.description as string | null) ?? null,
