@@ -28,10 +28,15 @@ const mockSecretService = vi.hoisted(() => ({
 }));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
+const mockBuilderProposalStore = vi.hoisted(() => ({
+  getByApprovalId: vi.fn(),
+  updateStatusFromApproval: vi.fn(),
+}));
 
 function registerModuleMocks() {
   vi.doMock("../services/index.js", () => ({
     approvalService: () => mockApprovalService,
+    builderProposalStore: () => mockBuilderProposalStore,
     heartbeatService: () => mockHeartbeatService,
     issueApprovalService: () => mockIssueApprovalService,
     logActivity: mockLogActivity,
@@ -106,10 +111,14 @@ describe("approval routes idempotent retries", () => {
     mockIssueApprovalService.listIssuesForApproval.mockReset();
     mockIssueApprovalService.linkManyForApproval.mockReset();
     mockSecretService.normalizeHireApprovalPayloadForPersistence.mockReset();
+    mockBuilderProposalStore.getByApprovalId.mockReset();
+    mockBuilderProposalStore.updateStatusFromApproval.mockReset();
     mockLogActivity.mockReset();
     mockHeartbeatService.wakeup.mockResolvedValue({ id: "wake-1" });
     mockIssueApprovalService.listIssuesForApproval.mockResolvedValue([{ id: "issue-1" }]);
     mockLogActivity.mockResolvedValue(undefined);
+    mockBuilderProposalStore.getByApprovalId.mockResolvedValue(null);
+    mockBuilderProposalStore.updateStatusFromApproval.mockResolvedValue(null);
   });
 
   it("does not emit duplicate approval side effects when approve is already resolved", async () => {
@@ -233,6 +242,43 @@ describe("approval routes idempotent retries", () => {
     expect(mockApprovalService.approve).toHaveBeenCalledWith("approval-4", "user-1", "ship it");
   });
 
+  it("syncs the linked builder proposal status when an approval is approved", async () => {
+    mockApprovalService.getById.mockResolvedValue({
+      id: "approval-7",
+      companyId: "company-1",
+      type: "hire_agent",
+      status: "pending",
+      payload: {},
+      requestedByAgentId: null,
+    });
+    mockApprovalService.approve.mockResolvedValue({
+      approval: {
+        id: "approval-7",
+        companyId: "company-1",
+        type: "hire_agent",
+        status: "approved",
+        payload: {},
+        requestedByAgentId: null,
+      },
+      applied: true,
+    });
+    mockBuilderProposalStore.getByApprovalId.mockResolvedValue({
+      id: "proposal-7",
+      companyId: "company-1",
+    });
+
+    const res = await request(await createApp())
+      .post("/api/approvals/approval-7/approve")
+      .send({ decisionNote: "ship it" });
+
+    expect(res.status).toBe(200);
+    expect(mockBuilderProposalStore.updateStatusFromApproval).toHaveBeenCalledWith(
+      "proposal-7",
+      "approved",
+      "user-1",
+    );
+  });
+
   it("derives approval attribution from the authenticated actor on reject", async () => {
     mockApprovalService.getById.mockResolvedValue({
       id: "approval-5",
@@ -258,6 +304,41 @@ describe("approval routes idempotent retries", () => {
 
     expect(res.status).toBe(200);
     expect(mockApprovalService.reject).toHaveBeenCalledWith("approval-5", "user-1", "not now");
+  });
+
+  it("syncs the linked builder proposal status when an approval is rejected", async () => {
+    mockApprovalService.getById.mockResolvedValue({
+      id: "approval-8",
+      companyId: "company-1",
+      type: "set_budget",
+      status: "pending",
+      payload: {},
+    });
+    mockApprovalService.reject.mockResolvedValue({
+      approval: {
+        id: "approval-8",
+        companyId: "company-1",
+        type: "set_budget",
+        status: "rejected",
+        payload: {},
+      },
+      applied: true,
+    });
+    mockBuilderProposalStore.getByApprovalId.mockResolvedValue({
+      id: "proposal-8",
+      companyId: "company-1",
+    });
+
+    const res = await request(await createApp())
+      .post("/api/approvals/approval-8/reject")
+      .send({ decisionNote: "not now" });
+
+    expect(res.status).toBe(200);
+    expect(mockBuilderProposalStore.updateStatusFromApproval).toHaveBeenCalledWith(
+      "proposal-8",
+      "rejected",
+      "user-1",
+    );
   });
 
   it("derives approval attribution from the authenticated actor on request revision", async () => {

@@ -78,7 +78,7 @@ export function proposalService(db: Db) {
             // Concurrent race — transaction rolled back, re-fetch the current proposal
             wonRace = false;
             result = null; // Clear stale result from rolled-back apply
-            return store.getById(companyId, proposalId);
+            return store.getById(companyId, proposalId).catch(() => null);
           }
           throw err; // Re-throw non-concurrent errors
         });

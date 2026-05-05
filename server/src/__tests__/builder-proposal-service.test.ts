@@ -22,38 +22,43 @@ function seedProposal(p: Record<string, unknown>): void {
 }
 
 vi.mock("../services/builder/proposal-store.js", () => {
+  const defaultStore = {
+    getById: vi.fn(async (_companyId: string, id: string) => mockProposals.get(id) ?? null),
+    list: vi.fn(),
+    pendingCount: vi.fn(),
+    markApplied: vi.fn(async (id: string, decidedByUserId: string) => {
+      const p = mockProposals.get(id);
+      if (!p) return null;
+      const next = { ...p, status: "applied", decidedByUserId, decidedAt: new Date() };
+      mockProposals.set(id, next);
+      return next;
+    }),
+    markRejected: vi.fn(async (id: string, decidedByUserId: string) => {
+      const p = mockProposals.get(id);
+      if (!p) return null;
+      const next = { ...p, status: "rejected", decidedByUserId, decidedAt: new Date() };
+      mockProposals.set(id, next);
+      return next;
+    }),
+    markFailed: vi.fn(async (id: string, decidedByUserId: string, reason: string) => {
+      const p = mockProposals.get(id);
+      if (!p) return null;
+      const next = {
+        ...p,
+        status: "failed",
+        decidedByUserId,
+        decidedAt: new Date(),
+        failureReason: reason,
+      };
+      mockProposals.set(id, next);
+      return next;
+    }),
+  };
+
   return {
-    builderProposalStore: () => ({
-      getById: vi.fn(async (_companyId: string, id: string) => mockProposals.get(id) ?? null),
-      list: vi.fn(),
-      pendingCount: vi.fn(),
-      markApplied: vi.fn(async (id: string, decidedByUserId: string) => {
-        const p = mockProposals.get(id);
-        if (!p) return null;
-        const next = { ...p, status: "applied", decidedByUserId, decidedAt: new Date() };
-        mockProposals.set(id, next);
-        return next;
-      }),
-      markRejected: vi.fn(async (id: string, decidedByUserId: string) => {
-        const p = mockProposals.get(id);
-        if (!p) return null;
-        const next = { ...p, status: "rejected", decidedByUserId, decidedAt: new Date() };
-        mockProposals.set(id, next);
-        return next;
-      }),
-      markFailed: vi.fn(async (id: string, decidedByUserId: string, reason: string) => {
-        const p = mockProposals.get(id);
-        if (!p) return null;
-        const next = {
-          ...p,
-          status: "failed",
-          decidedByUserId,
-          decidedAt: new Date(),
-          failureReason: reason,
-        };
-        mockProposals.set(id, next);
-        return next;
-      }),
+    builderProposalStore: (db?: { __builderProposalStoreOverrides?: Record<string, unknown> }) => ({
+      ...defaultStore,
+      ...(db?.__builderProposalStoreOverrides ?? {}),
     }),
   };
 });
@@ -152,5 +157,51 @@ describe("proposalService", () => {
 
     expect(apply).not.toHaveBeenCalled();
     expect((result as { status: string } | null)?.status).toBe("rejected");
+  });
+
+  it("treats failed concurrent re-fetches as a no-op instead of surfacing a 500", async () => {
+    const apply = vi.fn(async () => ({ summary: "ran", entityId: "ent-1", entityType: "thing" }));
+    const tool = defineMutationTool({
+      name: "concurrent_thing",
+      description: "x",
+      parametersSchema: { type: "object" },
+      capability: "test",
+      source: "test_extension3",
+      buildPayload: () => ({}),
+      summarize: () => "concurrent thing",
+      apply,
+    });
+    registerBuilderTool(tool);
+
+    seedProposal({
+      id: "p4",
+      companyId,
+      sessionId,
+      messageId: "m1",
+      kind: "concurrent_thing",
+      payload: {},
+      status: "pending",
+    });
+
+    const outerGetById = vi
+      .fn()
+      .mockResolvedValueOnce(mockProposals.get("p4"))
+      .mockRejectedValueOnce(new Error("transient read failure"));
+    const txDb = {
+      __builderProposalStoreOverrides: {
+        markApplied: vi.fn(async () => null),
+      },
+    };
+    const mockDb = {
+      __builderProposalStoreOverrides: {
+        getById: outerGetById,
+      },
+      transaction: vi.fn(async (fn) => fn(txDb)),
+    } as unknown as Db;
+
+    const svc = proposalService(mockDb);
+    const result = await svc.apply(companyId, "p4", "user-1");
+
+    expect(result).toBeNull();
   });
 });

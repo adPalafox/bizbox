@@ -25,6 +25,7 @@ import {
  */
 export const BUILDER_MAX_TURNS = 8;
 export const BUILDER_MAX_TOOL_CALLS_PER_TURN = 16;
+export const BUILDER_MAX_TRANSCRIPT_MESSAGES = 80;
 
 const SYSTEM_PROMPT = `You are the AI Builder for a single Bizbox company. You help a board operator inspect and shape the company's control-plane primitives — agents, goals, projects, issues, routines, budgets.
 
@@ -72,6 +73,13 @@ function toProviderMessages(persisted: PersistedBuilderMessage[]): BuilderProvid
   return out;
 }
 
+function trimTranscriptForProvider(
+  persisted: PersistedBuilderMessage[],
+): PersistedBuilderMessage[] {
+  if (persisted.length <= BUILDER_MAX_TRANSCRIPT_MESSAGES) return persisted;
+  return persisted.slice(-BUILDER_MAX_TRANSCRIPT_MESSAGES);
+}
+
 /**
  * Run a single Builder turn: hand the transcript to the adapter, execute any tool
  * calls it emits, feed the results back, repeat until the model stops or we
@@ -108,7 +116,7 @@ export async function runBuilderTurn(opts: {
   for (let turn = 0; turn < BUILDER_MAX_TURNS; turn += 1) {
     if (signal?.aborted) break;
 
-    const transcript = await store.listMessages(sessionId);
+    const transcript = trimTranscriptForProvider(await store.listMessages(sessionId));
     const providerMessages = toProviderMessages(transcript);
 
     const response = await executeBuilderTurn({

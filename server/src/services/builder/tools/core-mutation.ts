@@ -512,12 +512,19 @@ const hireAgent: BuilderTool = defineMutationTool({
   capability: "agents.write",
 
   approvalType: "hire_agent",
-  buildPayload(params) {
+  async buildPayload(params, ctx) {
+    const reportsTo = stringOrNull(params.reportsTo);
+    if (reportsTo) {
+      const manager = await agentService(ctx.db).getById(reportsTo);
+      if (!manager || manager.companyId !== ctx.companyId) {
+        throw new Error("Manager agent not found");
+      }
+    }
     return {
       name: nonEmptyString(params.name, "name"),
       role: nonEmptyString(params.role, "role"),
       title: stringOrNull(params.title),
-      reportsTo: stringOrNull(params.reportsTo),
+      reportsTo,
       adapterType: nonEmptyString(params.adapterType, "adapterType"),
       capabilities: stringOrNull(params.capabilities),
       adapterConfig: {},
@@ -563,13 +570,25 @@ const setBudget: BuilderTool = defineMutationTool({
   capability: "budgets.write",
 
   approvalType: "set_budget",
-  buildPayload(params, ctx) {
+  async buildPayload(params, ctx) {
     const scopeType = nonEmptyString(params.scopeType, "scopeType");
     if (!["company", "agent", "project"].includes(scopeType)) {
       throw new Error("scopeType must be company, agent, or project");
     }
     const scopeId =
       scopeType === "company" ? ctx.companyId : nonEmptyString(params.scopeId, "scopeId");
+    if (scopeType === "agent") {
+      const agent = await agentService(ctx.db).getById(scopeId);
+      if (!agent || agent.companyId !== ctx.companyId) {
+        throw new Error("Budget scope agent not found");
+      }
+    }
+    if (scopeType === "project") {
+      const project = await projectService(ctx.db).getById(scopeId);
+      if (!project || project.companyId !== ctx.companyId) {
+        throw new Error("Budget scope project not found");
+      }
+    }
     const amount = Number(params.amountCents);
     if (!Number.isFinite(amount) || amount < 0) throw new Error("amountCents must be a non-negative number");
     return {

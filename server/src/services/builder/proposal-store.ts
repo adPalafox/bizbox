@@ -75,6 +75,23 @@ export function builderProposalStore(db: Db) {
       return row ? toProposal(row) : null;
     },
 
+    getByApprovalId: async (
+      companyId: string,
+      approvalId: string,
+    ): Promise<BuilderProposal | null> => {
+      const row = await db
+        .select()
+        .from(builderProposals)
+        .where(
+          and(
+            eq(builderProposals.companyId, companyId),
+            eq(builderProposals.approvalId, approvalId),
+          ),
+        )
+        .then((rows) => rows[0] ?? null);
+      return row ? toProposal(row) : null;
+    },
+
     create: async (input: {
       sessionId: string;
       messageId: string;
@@ -181,12 +198,16 @@ export function builderProposalStore(db: Db) {
     updateStatusFromApproval: async (
       proposalId: string,
       status: BuilderProposalStatus,
+      decidedByUserId?: string | null,
     ): Promise<BuilderProposal | null> => {
+      const now = new Date();
       const [row] = await db
         .update(builderProposals)
         .set({
           status,
-          updatedAt: new Date(),
+          decidedByUserId: decidedByUserId ?? null,
+          decidedAt: status === "approved" || status === "rejected" ? now : null,
+          updatedAt: now,
         })
         .where(eq(builderProposals.id, proposalId))
         .returning();

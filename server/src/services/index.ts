@@ -51,3 +51,4 @@ export { publishLiveEvent, subscribeCompanyLiveEvents } from "./live-events.js";
 export { reconcilePersistedRuntimeServicesOnStartup, restartDesiredRuntimeServicesOnStartup } from "./workspace-runtime.js";
 export { createStorageServiceFromConfig, getStorageService } from "../storage/index.js";
 export { builderService, registerBuilderTool } from "./builder/index.js";
+export { builderProposalStore } from "./builder/proposal-store.js";

@@ -11,6 +11,7 @@ import { validate } from "../middleware/validate.js";
 import { logger } from "../middleware/logger.js";
 import {
   approvalService,
+  builderProposalStore,
   heartbeatService,
   issueApprovalService,
   logActivity,
@@ -29,6 +30,7 @@ function redactApprovalPayload<T extends { payload: Record<string, unknown> }>(a
 export function approvalRoutes(db: Db) {
   const router = Router();
   const svc = approvalService(db);
+  const builderProposals = builderProposalStore(db);
   const heartbeat = heartbeatService(db);
   const issueApprovalsSvc = issueApprovalService(db);
   const secretsSvc = secretService(db);
@@ -136,6 +138,14 @@ export function approvalRoutes(db: Db) {
     }
     const decidedByUserId = req.actor.userId ?? "board";
     const { approval, applied } = await svc.approve(id, decidedByUserId, req.body.decisionNote);
+    const builderProposal = await builderProposals.getByApprovalId(approval.companyId, approval.id);
+    if (builderProposal) {
+      await builderProposals.updateStatusFromApproval(
+        builderProposal.id,
+        "approved",
+        decidedByUserId,
+      );
+    }
 
     if (applied) {
       const linkedIssues = await issueApprovalsSvc.listIssuesForApproval(approval.id);
@@ -232,6 +242,14 @@ export function approvalRoutes(db: Db) {
     }
     const decidedByUserId = req.actor.userId ?? "board";
     const { approval, applied } = await svc.reject(id, decidedByUserId, req.body.decisionNote);
+    const builderProposal = await builderProposals.getByApprovalId(approval.companyId, approval.id);
+    if (builderProposal) {
+      await builderProposals.updateStatusFromApproval(
+        builderProposal.id,
+        "rejected",
+        decidedByUserId,
+      );
+    }
 
     if (applied) {
       await logActivity(db, {

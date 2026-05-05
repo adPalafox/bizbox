@@ -197,6 +197,46 @@ describe("builder runner", () => {
     expect(toolMessage?.content.toolResult?.ok).toBe(false);
     expect(JSON.stringify(toolMessage?.content.toolResult?.result)).toContain("Unknown tool");
   });
+
+  it("bounds the transcript sent to the adapter for long-lived sessions", async () => {
+    const { state, store } = makeStore();
+    for (let i = 0; i < 100; i += 1) {
+      state.messages.push({
+        id: `msg-${i}`,
+        sessionId,
+        companyId,
+        sequence: i,
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: { text: `message-${i}` },
+        inputTokens: 0,
+        outputTokens: 0,
+        costCents: 0,
+        createdAt: new Date(),
+      });
+    }
+
+    mockExecuteBuilderTurn.mockResolvedValueOnce({
+      text: "trimmed",
+      toolCalls: [],
+      finishReason: "stop",
+      usage: { inputTokens: 3, outputTokens: 1, costCents: 0 },
+    });
+
+    await runBuilderTurn({
+      db: {} as unknown as Db,
+      adapterConfig: config,
+      sessionId,
+      companyId,
+      actor: { type: "user", id: "user-1" },
+      store: store as unknown as Parameters<typeof runBuilderTurn>[0]["store"],
+      toolCatalog: makeCatalog([]),
+    });
+
+    const firstCall = mockExecuteBuilderTurn.mock.calls[0]?.[0];
+    expect(firstCall.messages).toHaveLength(81);
+    expect(firstCall.messages[1]).toMatchObject({ role: "user", content: "message-20" });
+    expect(firstCall.messages.at(-1)).toMatchObject({ content: "message-99" });
+  });
 });
 
 describe("builder tool registry", () => {
