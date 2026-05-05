@@ -61,6 +61,12 @@ export function proposalService(db: Db) {
       try {
         const result = await tool.apply(proposal.payload, ctx);
         const applied = await store.markApplied(proposalId, decidedByUserId, null);
+        if (!applied) {
+          // Another concurrent apply already won — treat as idempotent success by
+          // re-fetching the now-applied proposal so the caller gets a real value.
+          const current = await store.getById(companyId, proposalId);
+          return current;
+        }
         // Best-effort activity log — never fail the apply because of logging
         await logActivity(db, {
           companyId,

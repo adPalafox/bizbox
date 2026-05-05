@@ -157,16 +157,6 @@ export const openAiCompatProvider: BuilderProvider = {
 /**
  * Log a warning if the model lacks pricing data. This is called once per
  * session initialization so operators see the gap in logs without flooding.
- */
-export function warnIfMissingPricing(model: string): void {
-  if (!hasModelPricing(model)) {
-    logger.warn(
-      { model },
-      "No pricing data for model — budget hard-stop will not trigger for Builder spend",
-    );
-  }
-}
-
 /**
  * Look up a provider implementation by `providerType`. The Builder is single-
  * provider in v0; Anthropic and others land in later phases.
