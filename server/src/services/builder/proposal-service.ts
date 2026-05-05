@@ -108,6 +108,11 @@ export function proposalService(db: Db) {
         throw new Error(`Proposal is ${proposal.status}; cannot reject`);
       }
       const rejected = await store.markRejected(proposalId, decidedByUserId);
+      if (!rejected) {
+        // Race: another request already rejected this proposal — return the current state
+        const current = await store.getById(companyId, proposalId);
+        return current;
+      }
       // Best-effort activity log — never fail the reject because of logging
       await logActivity(db, {
         companyId,

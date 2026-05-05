@@ -4,6 +4,7 @@ import type {
   BuilderToolRunResult,
 } from "../types.js";
 import type { ProposalApplier } from "../applier-types.js";
+import { builderProposalStore } from "../proposal-store.js";
 
 /**
  * Helper for declaring a mutation tool whose `run()` simply records a
@@ -75,35 +76,44 @@ export function defineMutationTool(def: MutationToolDef): MutationTool {
         };
       }
 
-      let approvalId: string | null = null;
-      if (def.approvalType) {
-        const { approvalService } = await import("../../approvals.js");
-        const approval = await approvalService(ctx.db).create(ctx.companyId, {
-          type: def.approvalType,
-          requestedByUserId: ctx.actor.type === "user" ? ctx.actor.id : null,
-          requestedByAgentId: null,
-          payload,
-        });
-        approvalId = approval.id;
-      }
+      // Wrap approval + proposal creation in a transaction to prevent orphaned approvals
+      const result = await ctx.db.transaction(async (tx) => {
+        let approvalId: string | null = null;
+        if (def.approvalType) {
+          const { approvalService } = await import("../../approvals.js");
+          const approval = await approvalService(tx as any).create(ctx.companyId, {
+            type: def.approvalType,
+            requestedByUserId: ctx.actor.type === "user" ? ctx.actor.id : null,
+            requestedByAgentId: null,
+            payload,
+          });
+          approvalId = approval.id;
+        }
 
-      const proposal = await ctx.proposalStore.create({
-        sessionId: ctx.sessionId,
-        messageId: ctx.messageId,
-        companyId: ctx.companyId,
-        kind: def.name,
-        payload,
-        approvalId,
+        const txProposalStore = builderProposalStore(tx as any);
+        const proposal = await txProposalStore.create({
+          sessionId: ctx.sessionId,
+          messageId: ctx.messageId,
+          companyId: ctx.companyId,
+          kind: def.name,
+          payload,
+          approvalId,
+        });
+
+        return {
+          proposalId: proposal.id,
+          approvalId,
+        };
       });
 
       return {
         ok: true,
-        proposalId: proposal.id,
+        proposalId: result.proposalId,
         result: {
           status: "pending",
           summary: def.summarize(payload),
-          proposalId: proposal.id,
-          ...(approvalId ? { approvalId, requiresApproval: true } : {}),
+          proposalId: result.proposalId,
+          ...(result.approvalId ? { approvalId: result.approvalId, requiresApproval: true } : {}),
         },
       };
     },
