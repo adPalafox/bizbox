@@ -142,7 +142,7 @@ export function approvalRoutes(db: Db) {
     if (builderProposal) {
       await builderProposals.updateStatusFromApproval(
         builderProposal.id,
-        "approved",
+        applied ? "applied" : "approved",
         decidedByUserId,
       );
     }

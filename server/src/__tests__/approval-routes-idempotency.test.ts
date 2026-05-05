@@ -274,6 +274,43 @@ describe("approval routes idempotent retries", () => {
     expect(res.status).toBe(200);
     expect(mockBuilderProposalStore.updateStatusFromApproval).toHaveBeenCalledWith(
       "proposal-7",
+      "applied",
+      "user-1",
+    );
+  });
+
+  it("keeps the linked builder proposal approved when approval is not yet fully applied", async () => {
+    mockApprovalService.getById.mockResolvedValue({
+      id: "approval-9",
+      companyId: "company-1",
+      type: "hire_agent",
+      status: "pending",
+      payload: {},
+      requestedByAgentId: null,
+    });
+    mockApprovalService.approve.mockResolvedValue({
+      approval: {
+        id: "approval-9",
+        companyId: "company-1",
+        type: "hire_agent",
+        status: "approved",
+        payload: {},
+        requestedByAgentId: null,
+      },
+      applied: false,
+    });
+    mockBuilderProposalStore.getByApprovalId.mockResolvedValue({
+      id: "proposal-9",
+      companyId: "company-1",
+    });
+
+    const res = await request(await createApp())
+      .post("/api/approvals/approval-9/approve")
+      .send({ decisionNote: "ship it" });
+
+    expect(res.status).toBe(200);
+    expect(mockBuilderProposalStore.updateStatusFromApproval).toHaveBeenCalledWith(
+      "proposal-9",
       "approved",
       "user-1",
     );
