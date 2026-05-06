@@ -40,6 +40,7 @@ export interface ExecuteBuilderTurnInput {
   tools: BuilderToolDescriptor[];
   adapterConfig: BuilderAdapterConfig;
   signal?: AbortSignal;
+  authToken?: string;
 }
 
 export interface BuilderAdapterMessage {
@@ -93,7 +94,7 @@ export const BUILDER_SUPPORTED_ADAPTER_TYPES = [
 export async function executeBuilderTurn(
   input: ExecuteBuilderTurnInput,
 ): Promise<BuilderAdapterResponse> {
-  const { db, sessionId, companyId, messages, tools, adapterConfig, signal } = input;
+  const { db, sessionId, companyId, messages, tools, adapterConfig, signal, authToken } = input;
   const { adapterType, adapterConfig: config } = adapterConfig;
 
   // Get the adapter from registry (same as agents use)
@@ -159,6 +160,7 @@ export async function executeBuilderTurn(
     context,
     onLog,
     onMeta,
+    authToken: authToken ?? undefined,
   };
 
   try {

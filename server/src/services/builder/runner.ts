@@ -150,6 +150,9 @@ export async function runBuilderTurn(opts: {
       tools: providerTools,
       adapterConfig,
       signal,
+      authToken: typeof adapterConfig.adapterConfig.authToken === "string" 
+        ? adapterConfig.adapterConfig.authToken 
+        : undefined,
     });
 
     usage.inputTokens += response.usage.inputTokens;
