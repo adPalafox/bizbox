@@ -66,10 +66,15 @@ async function assertGoalIdsBelongToCompany(
   goalIds: string[] | undefined,
 ) {
   for (const goalId of goalIds ?? []) {
-    const goal = await goalService(db).getById(goalId);
-    if (!goal || goal.companyId !== companyId) {
-      throw new Error("Goal not found");
-    }
+    await assertGoalBelongsToCompany(db, companyId, goalId);
+  }
+}
+
+async function assertGoalBelongsToCompany(db: any, companyId: string, goalId: string | null) {
+  if (!goalId) return;
+  const goal = await goalService(db).getById(goalId);
+  if (!goal || goal.companyId !== companyId) {
+    throw new Error("Goal not found");
   }
 }
 
@@ -217,6 +222,13 @@ const runRoutine: BuilderTool = {
       executionWorkspacePreference: params.executionWorkspacePreference,
       executionWorkspaceSettings: params.executionWorkspaceSettings,
     });
+    await assertProjectBelongsToCompany(ctx.db, ctx.companyId, parsed.projectId ?? null);
+    await assertAgentBelongsToCompany(
+      ctx.db,
+      ctx.companyId,
+      parsed.assigneeAgentId ?? null,
+      "Assignee agent",
+    );
     const run = await routineService(ctx.db).runRoutine(routine.id, parsed);
     await logActivity(ctx.db, {
       companyId: ctx.companyId,
@@ -618,6 +630,7 @@ const createProject = defineMutationTool({
     return `Create project "${String(payload.name)}"`;
   },
   async apply(payload, ctx) {
+    await assertGoalBelongsToCompany(ctx.db, ctx.companyId, (payload.goalId as string | null) ?? null);
     await assertGoalIdsBelongToCompany(ctx.db, ctx.companyId, payload.goalIds as string[] | undefined);
     await assertAgentBelongsToCompany(ctx.db, ctx.companyId, (payload.leadAgentId as string | null) ?? null, "Lead agent");
     const created = await projectService(ctx.db).create(ctx.companyId, payload as any);
@@ -682,6 +695,7 @@ const updateProject = defineMutationTool({
     const existing = await projectService(ctx.db).getById(String(payload.projectId));
     if (!existing || existing.companyId !== ctx.companyId) throw new Error("Project not found");
     const patch = payload.patch as Record<string, unknown>;
+    await assertGoalBelongsToCompany(ctx.db, ctx.companyId, (patch.goalId as string | null) ?? null);
     await assertGoalIdsBelongToCompany(ctx.db, ctx.companyId, patch.goalIds as string[] | undefined);
     await assertAgentBelongsToCompany(ctx.db, ctx.companyId, (patch.leadAgentId as string | null) ?? null, "Lead agent");
     const updated = await projectService(ctx.db).update(existing.id, patch as any);
