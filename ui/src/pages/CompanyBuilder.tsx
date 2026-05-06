@@ -6,6 +6,7 @@ import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useToastActions } from "../context/ToastContext";
 import { builderApi } from "../api/builder";
+import { agentsApi } from "../api/agents";
 import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,18 +42,7 @@ function getAvailableBuilderAdapters(supportedAdapterTypes: string[]) {
   return allAdapters.filter((adapter) => supported.has(adapter.type));
 }
 
-// Get models for a specific adapter type
-async function getAdapterModels(adapterType: string): Promise<Array<{ id: string; label: string }>> {
-  const adapter = getUIAdapter(adapterType);
-  if (!adapter) return [];
-  // Access models from the adapter module if available
-  try {
-    const module = await import(/* @vite-ignore */ `@paperclipai/adapter-${adapterType.replace(/_/g, '-')}`);
-    return module.models || [];
-  } catch {
-    return [];
-  }
-}
+
 
 // Get adapter compatibility status badge
 function getAdapterStatusBadge(adapterType: string): string {
@@ -265,8 +255,6 @@ function SettingsPanel({ companyId }: { companyId: string }) {
     queryFn: () => builderApi.getSettings(companyId),
   });
   const [form, setForm] = useState<SettingsFormState | null>(null);
-  const [availableModels, setAvailableModels] = useState<Array<{ id: string; label: string }>>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
   // Track dirty config fields (edited but not saved)
   const [dirtyConfig, setDirtyConfig] = useState<Record<string, unknown>>({});
 
@@ -282,6 +270,15 @@ function SettingsPanel({ companyId }: { companyId: string }) {
     return getUIAdapter(form.adapterType);
   }, [form?.adapterType]);
 
+  // Fetch models for current adapter type
+  const modelsQuery = useQuery({
+    queryKey: ["adapterModels", companyId, form?.adapterType] as const,
+    queryFn: () => agentsApi.adapterModels(companyId, form!.adapterType),
+    enabled: Boolean(companyId && form?.adapterType),
+  });
+
+  const availableModels = modelsQuery.data ?? [];
+
   useEffect(() => {
     if (settingsQuery.data) {
       const derived = deriveFormFromSettings(settingsQuery.data.settings);
@@ -290,34 +287,19 @@ function SettingsPanel({ companyId }: { companyId: string }) {
     }
   }, [settingsQuery.data]);
 
-  // Load models when adapter type changes
+  // Auto-select first model when adapter changes and models load
   useEffect(() => {
-    if (form?.adapterType) {
-      setLoadingModels(true);
-      getAdapterModels(form.adapterType)
-        .then((models) => {
-          setAvailableModels(models);
-          // If no model is set and models are available, select the first one
-          if (!form.formValues.model && models.length > 0) {
-            setForm((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    formValues: { ...prev.formValues, model: models[0].id },
-                  }
-                : null,
-            );
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to load models:", err);
-          setAvailableModels([]);
-        })
-        .finally(() => {
-          setLoadingModels(false);
-        });
+    if (form && availableModels.length > 0 && !form.formValues.model) {
+      setForm((prev) =>
+        prev
+          ? {
+              ...prev,
+              formValues: { ...prev.formValues, model: availableModels[0].id },
+            }
+          : null,
+      );
     }
-  }, [form?.adapterType]);
+  }, [availableModels, form?.adapterType]);
 
   const mutation = useMutation({
     mutationFn: async () => {
