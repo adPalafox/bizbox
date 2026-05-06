@@ -598,7 +598,7 @@ export function CompanyBuilder() {
       </Card>
 
       <Card className="overflow-hidden">
-        <CardContent className="space-y-4 p-3">
+        <CardContent className="h-[70vh] space-y-4 overflow-y-auto p-3">
           <SettingsPanel companyId={selectedCompanyId} />
           <ToolList companyId={selectedCompanyId} />
         </CardContent>
