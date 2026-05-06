@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "../components/EmptyState";
 import { listUIAdapters, getUIAdapter } from "../adapters";
+import { AgentConfigForm } from "../components/AgentConfigForm";
 import type {
   BuilderMessage,
   BuilderProviderSettings,
@@ -41,8 +42,6 @@ function getAvailableBuilderAdapters(supportedAdapterTypes: string[]) {
   const allAdapters = listUIAdapters();
   return allAdapters.filter((adapter) => supported.has(adapter.type));
 }
-
-
 
 // Get adapter compatibility status badge
 function getAdapterStatusBadge(adapterType: string): string {
@@ -182,53 +181,31 @@ function MessageBubble({
   );
 }
 
-interface SettingsFormState {
-  adapterType: string;
-  // Form values for the adapter's ConfigFields component
-  formValues: CreateConfigValues;
-}
-
-function deriveFormFromSettings(settings: BuilderProviderSettings | null): SettingsFormState {
-  const adapterConfig = settings?.adapterConfig ?? {};
+/** Convert stored adapterConfig to CreateConfigValues shape for the form */
+function settingsToFormValues(settings: BuilderProviderSettings | null): CreateConfigValues {
+  const config = settings?.adapterConfig ?? {};
   return {
     adapterType: settings?.adapterType ?? "claude_local",
-    formValues: adapterConfigToFormValues(adapterConfig),
-  };
-}
-
-/** Convert stored adapterConfig to form values for CreateConfigValues shape */
-function adapterConfigToFormValues(config: Record<string, unknown>): CreateConfigValues {
-  return {
-    // Common fields
-    adapterType: "",
     model: (config.model as string) ?? "",
     instructionsFilePath: (config.instructionsFilePath as string) ?? "",
     cwd: (config.cwd as string) ?? "",
-    // Claude-specific
     thinkingEffort: (config.effort as string) ?? "",
     chrome: (config.chrome as boolean) ?? false,
     dangerouslySkipPermissions: (config.dangerouslySkipPermissions as boolean) ?? false,
-    // Timeouts
     timeoutSec: (config.timeoutSec as number) ?? 0,
-    // Prompt template
     promptTemplate: (config.promptTemplate as string) ?? "",
     bootstrapPrompt: (config.bootstrapPromptTemplate as string) ?? "",
-    // Args
     command: (config.command as string) ?? "",
     extraArgs: Array.isArray(config.extraArgs) ? config.extraArgs.join(", ") : "",
     args: Array.isArray(config.args) ? config.args.join(", ") : "",
-    // Env bindings (for EnvVarEditor)
     envBindings: (config.env as Record<string, unknown>) ?? {},
     envVars: "",
-    // Codex/OpenCode specific
     search: (config.search as boolean) ?? false,
     fastMode: (config.fastMode as boolean) ?? false,
     dangerouslyBypassSandbox: (config.dangerouslyBypassSandbox as boolean) ?? false,
-    // OpenClaw
     url: (config.url as string) ?? "",
     accessToken: (config.accessToken as string) ?? undefined,
     apiKey: (config.apiKey as string) ?? undefined,
-    // Workspace settings
     workspaceStrategyType: (config.workspaceStrategyType as string) ?? undefined,
     workspaceBaseRef: (config.workspaceBaseRef as string) ?? undefined,
     workspaceBranchTemplate: (config.workspaceBranchTemplate as string) ?? undefined,
@@ -237,7 +214,6 @@ function adapterConfigToFormValues(config: Record<string, unknown>): CreateConfi
     runtimeServicesJson: (config.runtimeServicesJson as string) ?? undefined,
     artifactOutputsJson: (config.artifactOutputsJson as string) ?? undefined,
     maxTurnsPerRun: (config.maxTurnsPerRun as number) ?? 10,
-    // Heartbeat (runtime config)
     heartbeatEnabled: false,
     intervalSec: 300,
   };
@@ -246,17 +222,18 @@ function adapterConfigToFormValues(config: Record<string, unknown>): CreateConfi
 function SettingsPanel({ companyId }: { companyId: string }) {
   const queryClient = useQueryClient();
   const toast = useToastActions();
+  
   const toolsQuery = useQuery({
     queryKey: [...QUERY_KEY, "tools", companyId] as const,
     queryFn: () => builderApi.getTools(companyId),
   });
+  
   const settingsQuery = useQuery({
     queryKey: [...QUERY_KEY, "settings", companyId] as const,
     queryFn: () => builderApi.getSettings(companyId),
   });
-  const [form, setForm] = useState<SettingsFormState | null>(null);
-  // Track dirty config fields (edited but not saved)
-  const [dirtyConfig, setDirtyConfig] = useState<Record<string, unknown>>({});
+
+  const [formValues, setFormValues] = useState<CreateConfigValues | null>(null);
 
   // Get available Builder-compatible adapters dynamically
   const availableAdapters = useMemo(
@@ -266,57 +243,31 @@ function SettingsPanel({ companyId }: { companyId: string }) {
 
   // Get current adapter module
   const uiAdapter = useMemo(() => {
-    if (!form?.adapterType) return null;
-    return getUIAdapter(form.adapterType);
-  }, [form?.adapterType]);
+    if (!formValues?.adapterType) return null;
+    return getUIAdapter(formValues.adapterType);
+  }, [formValues?.adapterType]);
 
-  // Fetch models for current adapter type
-  const modelsQuery = useQuery({
-    queryKey: ["adapterModels", companyId, form?.adapterType] as const,
-    queryFn: () => agentsApi.adapterModels(companyId, form!.adapterType),
-    enabled: Boolean(companyId && form?.adapterType),
-  });
-
-  const availableModels = modelsQuery.data ?? [];
-
+  // Initialize form from settings
   useEffect(() => {
     if (settingsQuery.data) {
-      const derived = deriveFormFromSettings(settingsQuery.data.settings);
-      setForm(derived);
-      setDirtyConfig({}); // Clear dirty state when loading saved settings
+      setFormValues(settingsToFormValues(settingsQuery.data.settings));
     }
   }, [settingsQuery.data]);
 
-  // Auto-select first model when adapter changes and models load
-  useEffect(() => {
-    if (form && availableModels.length > 0 && !form.formValues.model) {
-      setForm((prev) =>
-        prev
-          ? {
-              ...prev,
-              formValues: { ...prev.formValues, model: availableModels[0].id },
-            }
-          : null,
-      );
-    }
-  }, [availableModels, form?.adapterType]);
-
   const mutation = useMutation({
     mutationFn: async () => {
-      if (!form || !uiAdapter) return null;
-
+      if (!formValues || !uiAdapter) return null;
+      
       // Build final adapter config using the adapter's own buildAdapterConfig
-      const baseConfig = uiAdapter.buildAdapterConfig(form.formValues);
-      const mergedConfig = { ...baseConfig, ...dirtyConfig };
+      const adapterConfig = uiAdapter.buildAdapterConfig(formValues);
 
       return builderApi.updateSettings(companyId, {
-        adapterType: form.adapterType,
-        adapterConfig: mergedConfig,
+        adapterType: formValues.adapterType,
+        adapterConfig,
       });
     },
     onSuccess: async () => {
       toast.pushToast({ title: "Builder settings saved", tone: "success" });
-      setDirtyConfig({}); // Clear dirty state after save
       await queryClient.invalidateQueries({ queryKey: [...QUERY_KEY, "settings", companyId] });
     },
     onError: (err) => {
@@ -328,32 +279,11 @@ function SettingsPanel({ companyId }: { companyId: string }) {
     },
   });
 
-  if (!form || !toolsQuery.data) {
+  if (!formValues || !toolsQuery.data) {
     return <div className="text-xs text-muted-foreground">Loading settings…</div>;
   }
 
-  const selectedAdapter = availableAdapters.find((a) => a.type === form.adapterType);
-
-  // Build props for the adapter's ConfigFields component
-  // We treat this like "create mode" for simplicity - we manage formValues ourselves
-  const adapterFieldProps = {
-    mode: "create" as const,
-    isCreate: true,
-    adapterType: form.adapterType,
-    values: form.formValues,
-    set: (patch: Partial<CreateConfigValues>) => {
-      setForm((prev) =>
-        prev ? { ...prev, formValues: { ...prev.formValues, ...patch } } : null,
-      );
-    },
-    config: settingsQuery.data?.settings?.adapterConfig ?? {},
-    eff: ((_group: "adapterConfig", _field: string, original: string) => original) as any,
-    mark: (_group: "adapterConfig", _field: string, _value: unknown) => {
-      // Builder saves in one go, so we don't need granular dirty tracking per field
-    },
-    models: availableModels,
-    hideInstructionsFile: true, // Builder doesn't need instructions file
-  };
+  const selectedAdapter = availableAdapters.find((a) => a.type === formValues.adapterType);
 
   return (
     <div className="space-y-4 text-sm">
@@ -365,14 +295,13 @@ function SettingsPanel({ companyId }: { companyId: string }) {
         Adapter Type
         <select
           className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
-          value={form.adapterType}
+          value={formValues.adapterType}
           onChange={(e) => {
             const newAdapterType = e.target.value;
-            setForm({
+            setFormValues({
+              ...settingsToFormValues(null),
               adapterType: newAdapterType,
-              formValues: adapterConfigToFormValues({}),
             });
-            setDirtyConfig({});
           }}
         >
           {availableAdapters.map((adapter) => (
@@ -383,17 +312,28 @@ function SettingsPanel({ companyId }: { companyId: string }) {
         </select>
         {selectedAdapter && (
           <div className="mt-1 text-[10px] text-muted-foreground">
-            {getAdapterStatusBadge(form.adapterType)}
+            {getAdapterStatusBadge(formValues.adapterType)}
           </div>
         )}
       </label>
 
-      {/* Render the adapter's own ConfigFields component */}
-      {uiAdapter && <uiAdapter.ConfigFields {...adapterFieldProps} />}
+      {/* Use AgentConfigForm in create mode to render adapter config fields */}
+      <div className="border-t border-border pt-3">
+        <AgentConfigForm
+          mode="create"
+          values={formValues}
+          onChange={(patch) => setFormValues((prev) => prev ? { ...prev, ...patch } : null)}
+          hideInlineSave
+          showAdapterTypeField={false}
+          showAdapterTestEnvironmentButton={false}
+          showCreateRunPolicySection={false}
+          hideInstructionsFile
+        />
+      </div>
 
       <Button
         onClick={() => mutation.mutate()}
-        disabled={mutation.isPending || !form.formValues.model?.trim()}
+        disabled={mutation.isPending || !formValues.model?.trim()}
         size="sm"
         className="w-full"
       >
