@@ -722,4 +722,42 @@ describe("approval routes idempotent retries", () => {
       }),
     );
   });
+
+  it("survives a double failure when both addComment and the failure activity log throw", async () => {
+    mockApprovalService.getById.mockResolvedValue({
+      id: "approval-11",
+      companyId: "company-1",
+      type: "request_board_approval",
+      status: "pending",
+      payload: {},
+    });
+    mockApprovalService.approve.mockResolvedValue({
+      approval: {
+        id: "approval-11",
+        companyId: "company-1",
+        type: "request_board_approval",
+        status: "approved",
+        payload: {},
+        requestedByAgentId: null,
+      },
+      applied: true,
+    });
+    mockIssueApprovalService.listIssuesForApproval.mockResolvedValue([{ id: "issue-e" }]);
+    mockIssueService.addComment.mockRejectedValueOnce(new Error("issue gone"));
+    // First logActivity call (approval.decision_comment_failed) rejects;
+    // second call (approval.approved) must still succeed and the route must
+    // return 200 to the client.
+    mockLogActivity.mockImplementationOnce(() => Promise.reject(new Error("activity log down")));
+    mockLogActivity.mockResolvedValue(undefined);
+
+    const res = await request(await createApp())
+      .post("/api/approvals/approval-11/approve")
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "approval.approved" }),
+    );
+  });
 });

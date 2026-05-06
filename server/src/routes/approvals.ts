@@ -102,6 +102,7 @@ export function approvalRoutes(db: Db) {
           logger.warn(
             {
               err: logErr,
+              originalErr: err,
               approvalId: approval.id,
               issueId,
               decision,
