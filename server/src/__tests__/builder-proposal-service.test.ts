@@ -7,6 +7,8 @@ import {
 } from "../services/builder/tool-registry.js";
 import { defineMutationTool } from "../services/builder/tools/mutation-tool.js";
 
+const mockLoggerWarn = vi.hoisted(() => vi.fn());
+
 // The proposal service performs read-modify-write on the proposal store and
 // also calls activity-log + the originating tool's `apply()`. We mock those
 // pieces so this test is hermetic.
@@ -14,6 +16,12 @@ import { defineMutationTool } from "../services/builder/tools/mutation-tool.js";
 vi.mock("../services/activity-log.js", () => ({
   logActivity: vi.fn(async () => undefined),
   setPluginEventBus: vi.fn(),
+}));
+
+vi.mock("../middleware/logger.js", () => ({
+  logger: {
+    warn: mockLoggerWarn,
+  },
 }));
 
 const mockProposals = new Map<string, Record<string, unknown>>();
@@ -69,6 +77,7 @@ const sessionId = "55555555-5555-4555-8555-555555555555";
 afterEach(() => {
   _resetBuilderToolExtensions();
   mockProposals.clear();
+  mockLoggerWarn.mockReset();
 });
 
 describe("proposalService", () => {
@@ -203,5 +212,55 @@ describe("proposalService", () => {
     const result = await svc.apply(companyId, "p4", "user-1");
 
     expect(result).toBeNull();
+  });
+
+  it("preserves the original applier error when markFailed also fails", async () => {
+    const apply = vi.fn(async () => {
+      throw new Error("apply exploded");
+    });
+    const tool = defineMutationTool({
+      name: "failing_thing",
+      description: "x",
+      parametersSchema: { type: "object" },
+      capability: "test",
+      source: "test_extension4",
+      buildPayload: () => ({}),
+      summarize: () => "failing thing",
+      apply,
+    });
+    registerBuilderTool(tool);
+
+    seedProposal({
+      id: "p5",
+      companyId,
+      sessionId,
+      messageId: "m1",
+      kind: "failing_thing",
+      payload: {},
+      status: "pending",
+    });
+
+    const txDb = {
+      __builderProposalStoreOverrides: {
+        markFailed: vi.fn(async () => {
+          throw new Error("markFailed exploded");
+        }),
+      },
+    };
+    const mockDb = {
+      __builderProposalStoreOverrides: txDb.__builderProposalStoreOverrides,
+      transaction: vi.fn(async (fn) => fn(mockDb)),
+    } as unknown as Db;
+
+    const svc = proposalService(mockDb);
+
+    await expect(svc.apply(companyId, "p5", "user-1")).rejects.toThrow("apply exploded");
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        proposalId: "p5",
+        originalReason: "apply exploded",
+      }),
+      "builder proposal markFailed failed",
+    );
   });
 });

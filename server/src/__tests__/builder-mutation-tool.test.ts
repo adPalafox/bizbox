@@ -3,6 +3,14 @@ import type { Db } from "@paperclipai/db";
 import { defineMutationTool, isMutationTool } from "../services/builder/tools/mutation-tool.js";
 import type { BuilderProposal } from "@paperclipai/shared";
 
+const mockApprovalCreate = vi.hoisted(() => vi.fn());
+
+vi.mock("../services/approvals.js", () => ({
+  approvalService: vi.fn(() => ({
+    create: mockApprovalCreate,
+  })),
+}));
+
 /**
  * Unit tests for the mutation-tool helper used by Phase 1/2 builder tools.
  *
@@ -138,5 +146,44 @@ describe("mutation-tool helper", () => {
     });
     expect(isMutationTool(tool)).toBe(true);
     expect(tool.proposalKind).toBe(tool.name);
+  });
+
+  it("refuses the non-transactional fallback outside tests", async () => {
+    const tool = defineMutationTool({
+      name: "test_governed_fallback",
+      description: "x",
+      parametersSchema: { type: "object" },
+      capability: "test",
+      approvalType: "hire_agent",
+      buildPayload: () => ({ name: "Agent" }),
+      summarize: () => "x",
+      apply: vi.fn(),
+    });
+
+    const { store } = fakeProposalStore();
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    mockApprovalCreate.mockReset();
+
+    try {
+      await expect(
+        tool.run(
+          {},
+          {
+            companyId,
+            sessionId,
+            messageId,
+            actor: { type: "user", id: "user-1" },
+            db: {} as unknown as Db,
+            proposalStore: store as unknown as Parameters<typeof tool.run>[1]["proposalStore"],
+          },
+        ),
+      ).rejects.toThrow("Mutation tool transaction fallback is only allowed in tests");
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+
+    expect(mockApprovalCreate).not.toHaveBeenCalled();
+    expect(store.create).not.toHaveBeenCalled();
   });
 });

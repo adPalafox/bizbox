@@ -26,6 +26,19 @@ export function proposalService(db: Db) {
     return null;
   }
 
+  async function markFailedBestEffort(
+    proposalId: string,
+    decidedByUserId: string | null,
+    reason: string,
+  ) {
+    await store.markFailed(proposalId, decidedByUserId, reason).catch((markFailedErr) =>
+      logger.warn(
+        { proposalId, markFailedErr, originalReason: reason },
+        "builder proposal markFailed failed",
+      ),
+    );
+  }
+
   return {
     list: store.list,
     get: store.getById,
@@ -46,7 +59,7 @@ export function proposalService(db: Db) {
       const tool = findApplier(proposal.kind, catalog);
       if (!tool) {
         const reason = `No registered applier for kind "${proposal.kind}"`;
-        await store.markFailed(proposalId, decidedByUserId, reason);
+        await markFailedBestEffort(proposalId, decidedByUserId, reason);
         throw new Error(reason);
       }
 
@@ -110,7 +123,7 @@ export function proposalService(db: Db) {
           { proposalId, kind: proposal.kind, err },
           "builder proposal apply failed",
         );
-        await store.markFailed(proposalId, decidedByUserId, reason);
+        await markFailedBestEffort(proposalId, decidedByUserId, reason);
         throw err;
       }
     },

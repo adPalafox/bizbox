@@ -121,6 +121,10 @@ export function defineMutationTool(def: MutationToolDef): MutationTool {
       }
 
       // Fallback for test mocks or environments without transaction support.
+      if (process.env.NODE_ENV !== "test") {
+        throw new Error("Mutation tool transaction fallback is only allowed in tests");
+      }
+
       // NOTE: This path is intentionally non-transactional. If proposal creation fails after
       // approval creation succeeds, an orphaned approval row will remain. This is acceptable
       // in test environments but should not be used in production (real db connections have
