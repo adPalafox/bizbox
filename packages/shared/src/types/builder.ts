@@ -20,6 +20,23 @@ export const BUILDER_PROPOSAL_STATUSES = [
 ] as const;
 export type BuilderProposalStatus = (typeof BUILDER_PROPOSAL_STATUSES)[number];
 
+export interface BuilderRuntimeConfigSummary {
+  adapterType: string;
+  model: string;
+  updatedAt: Date;
+  source: "company_settings";
+}
+
+export interface BuilderHandoffTarget {
+  kind: "approval" | "entity" | "proposal" | "settings";
+  label: string;
+  href: string | null;
+  approvalId?: string | null;
+  proposalId?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+}
+
 /**
  * One element of a Builder message transcript. Tool calls and tool results
  * are encoded into the message itself (rather than separate tables) so the
@@ -48,6 +65,8 @@ export interface BuilderToolResult {
   proposalStatus?: BuilderProposalStatus;
   /** Set when the tool performed an immediate mutation that produced an activity row. */
   activityId?: string;
+  /** Optional handoff target for the operator. */
+  handoff?: BuilderHandoffTarget | null;
 }
 
 export interface BuilderMessageContent {
@@ -77,12 +96,17 @@ export interface BuilderSession {
   companyId: string;
   createdByUserId: string | null;
   title: string;
+  /** Legacy snapshot only; live Builder turns use current company settings. */
   adapterType: string;
+  /** Legacy snapshot only; live Builder turns use current company settings. */
   model: string;
   state: BuilderSessionState;
+  archivedAt: Date | null;
   inputTokensTotal: number;
   outputTokensTotal: number;
   costCentsTotal: number;
+  /** Live Builder turns always use the current company-level Builder settings. */
+  effectiveRuntimeConfig?: BuilderRuntimeConfigSummary | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -130,6 +154,7 @@ export interface BuilderProposal {
   decidedByUserId: string | null;
   decidedAt: Date | null;
   failureReason: string | null;
+  handoff?: BuilderHandoffTarget | null;
   createdAt: Date;
   updatedAt: Date;
 }

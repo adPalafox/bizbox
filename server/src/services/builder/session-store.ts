@@ -9,6 +9,7 @@ import type {
   BuilderSessionDetail,
   BuilderSessionState,
   BuilderProposalStatus,
+  BuilderHandoffTarget,
 } from "@paperclipai/shared";
 
 /**
@@ -34,6 +35,7 @@ function toSession(row: SessionRow): BuilderSession {
     adapterType: row.adapterType,
     model: row.model,
     state: row.state as BuilderSessionState,
+    archivedAt: row.archivedAt,
     inputTokensTotal: row.inputTokensTotal,
     outputTokensTotal: row.outputTokensTotal,
     costCentsTotal: row.costCentsTotal,
@@ -42,7 +44,19 @@ function toSession(row: SessionRow): BuilderSession {
   };
 }
 
-function toMessage(row: MessageRow, proposalStatusMap?: Map<string, BuilderProposalStatus>): BuilderMessage {
+function approvalHandoff(approvalId: string): BuilderHandoffTarget {
+  return {
+    kind: "approval",
+    label: "Review approval",
+    href: `/approvals/${approvalId}`,
+    approvalId,
+  };
+}
+
+function toMessage(
+  row: MessageRow,
+  proposalInfoMap?: Map<string, { status: BuilderProposalStatus; handoff: BuilderHandoffTarget | null }>,
+): BuilderMessage {
   const raw = (row.content ?? {}) as Record<string, unknown>;
   const content: BuilderMessageContent = {};
   if (typeof raw.text === "string") content.text = raw.text;
@@ -51,10 +65,14 @@ function toMessage(row: MessageRow, proposalStatusMap?: Map<string, BuilderPropo
     const toolResult = raw.toolResult as BuilderMessageContent["toolResult"];
     content.toolResult = toolResult;
     // Attach proposal status if available
-    if (toolResult?.proposalId && proposalStatusMap) {
-      const status = proposalStatusMap.get(toolResult.proposalId);
-      if (status && content.toolResult) {
-        content.toolResult = { ...content.toolResult, proposalStatus: status };
+    if (toolResult?.proposalId && proposalInfoMap) {
+      const info = proposalInfoMap.get(toolResult.proposalId);
+      if (info && content.toolResult) {
+        content.toolResult = {
+          ...content.toolResult,
+          proposalStatus: info.status,
+          ...(info.handoff ? { handoff: info.handoff } : {}),
+        };
       }
     }
   }
@@ -82,11 +100,19 @@ export interface AppendMessageInput {
 
 export function builderSessionStore(db: Db) {
   return {
-    listSessions: async (companyId: string): Promise<BuilderSession[]> => {
+    listSessions: async (
+      companyId: string,
+      options?: { includeArchived?: boolean },
+    ): Promise<BuilderSession[]> => {
       const rows = await db
         .select()
         .from(builderSessions)
-        .where(eq(builderSessions.companyId, companyId))
+        .where(
+          and(
+            eq(builderSessions.companyId, companyId),
+            options?.includeArchived ? undefined : sql`${builderSessions.archivedAt} IS NULL`,
+          ),
+        )
         .orderBy(desc(builderSessions.createdAt));
       return rows.map(toSession);
     },
@@ -136,13 +162,19 @@ export function builderSessionStore(db: Db) {
         .from(builderProposals)
         .where(eq(builderProposals.sessionId, sessionId));
       
-      const proposalStatusMap = new Map<string, BuilderProposalStatus>(
-        proposals.map((p) => [p.id, p.status as BuilderProposalStatus])
+      const proposalInfoMap = new Map<string, { status: BuilderProposalStatus; handoff: BuilderHandoffTarget | null }>(
+        proposals.map((p) => [
+          p.id,
+          {
+            status: p.status as BuilderProposalStatus,
+            handoff: p.approvalId ? approvalHandoff(p.approvalId) : null,
+          },
+        ])
       );
       
       return { 
         ...toSession(session), 
-        messages: messages.map((msg) => toMessage(msg, proposalStatusMap))
+        messages: messages.map((msg) => toMessage(msg, proposalInfoMap))
       };
     },
 
@@ -172,9 +204,20 @@ export function builderSessionStore(db: Db) {
           adapterType: input.adapterType,
           model: input.model,
           state: "active",
+          archivedAt: null,
         })
         .returning();
       return toSession(row);
+    },
+
+    updateSessionTitle: async (
+      sessionId: string,
+      title: string,
+    ): Promise<void> => {
+      await db
+        .update(builderSessions)
+        .set({ title, updatedAt: new Date() })
+        .where(eq(builderSessions.id, sessionId));
     },
 
     setSessionState: async (
@@ -184,6 +227,26 @@ export function builderSessionStore(db: Db) {
       await db
         .update(builderSessions)
         .set({ state, updatedAt: new Date() })
+        .where(eq(builderSessions.id, sessionId));
+    },
+
+    archiveSession: async (
+      sessionId: string,
+      archivedAt: Date = new Date(),
+    ): Promise<void> => {
+      await db
+        .update(builderSessions)
+        .set({ archivedAt, updatedAt: archivedAt })
+        .where(eq(builderSessions.id, sessionId));
+    },
+
+    restoreSession: async (
+      sessionId: string,
+      restoredAt: Date = new Date(),
+    ): Promise<void> => {
+      await db
+        .update(builderSessions)
+        .set({ archivedAt: null, updatedAt: restoredAt })
         .where(eq(builderSessions.id, sessionId));
     },
 

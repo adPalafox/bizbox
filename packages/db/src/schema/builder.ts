@@ -32,6 +32,7 @@ export const builderSessions = pgTable(
     adapterType: text("adapter_type").notNull(),
     model: text("model").notNull(),
     state: text("state").notNull().default("active"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     inputTokensTotal: integer("input_tokens_total").notNull().default(0),
     outputTokensTotal: integer("output_tokens_total").notNull().default(0),
     costCentsTotal: integer("cost_cents_total").notNull().default(0),
@@ -42,6 +43,11 @@ export const builderSessions = pgTable(
   (table) => ({
     companyIdx: index("builder_sessions_company_idx").on(table.companyId),
     companyCreatedIdx: index("builder_sessions_company_created_idx").on(table.companyId, table.createdAt),
+    companyArchivedCreatedIdx: index("builder_sessions_company_archived_created_idx").on(
+      table.companyId,
+      table.archivedAt,
+      table.createdAt,
+    ),
   }),
 );
 

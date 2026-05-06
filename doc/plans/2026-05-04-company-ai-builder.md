@@ -59,7 +59,9 @@ Two key design choices:
   to keep invariants (atomic checkout, approval gates, budget hard-stop,
   activity log) intact.
 - **Builder runs are first-class `builder_sessions`** so transcripts, costs,
-  pause/stop, and activity can plug into existing systems.
+  pause/stop, and activity can plug into existing systems. Sessions are
+  conversation containers only; live runtime config comes from the
+  company-level Builder settings record.
 
 ## 4. Data model
 
@@ -67,7 +69,8 @@ New tables in `packages/db/src/schema/`:
 
 - `builder_sessions` — `id`, `companyId`, `createdByUserId`, `title`,
   `providerType`, `model`, `state` (`active|completed|aborted`), token totals,
-  timestamps.
+  timestamps. `providerType` and `model` are legacy snapshots; the active
+  runtime config is owned by `builder_provider_settings`.
 - `builder_messages` — `id`, `sessionId`, `companyId`, `role`
   (`user|assistant|tool|system`), `content` (JSON: text + tool calls + tool
   results), `tokens`, `costCents`, timestamps.
@@ -77,6 +80,8 @@ New tables in `packages/db/src/schema/`:
   Phase 0.)*
 - `builder_provider_settings` — `companyId`, `providerType`, `model`, `baseUrl`,
   `secretId` (FK to `companySecrets`), `extras`.
+  This is the single source of truth for Builder runtime config across all
+  sessions in the company.
 
 All four are company-scoped and cascade on company delete.
 

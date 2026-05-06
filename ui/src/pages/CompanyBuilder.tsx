@@ -1,515 +1,851 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "@/lib/router";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Send, RefreshCw, Settings as SettingsIcon, Wrench } from "lucide-react";
-import { useCompany } from "../context/CompanyContext";
-import { useBreadcrumbs } from "../context/BreadcrumbContext";
-import { useToastActions } from "../context/ToastContext";
-import { builderApi } from "../api/builder";
-import { agentsApi } from "../api/agents";
-import { queryKeys } from "../lib/queryKeys";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "../components/EmptyState";
-import { listUIAdapters, getUIAdapter } from "../adapters";
-import { AgentConfigForm } from "../components/AgentConfigForm";
 import type {
+  BuilderHandoffTarget,
   BuilderMessage,
-  BuilderProviderSettings,
+  BuilderProposal,
   BuilderSession,
   BuilderSessionDetail,
+  BuilderToolResult,
 } from "@paperclipai/shared";
-import type { CreateConfigValues } from "@paperclipai/adapter-utils";
-
-/**
- * Company AI Builder page.
- *
- * Three-pane layout:
- *
- *   [ session list ] [ chat transcript + inline proposal actions ] [ settings panel ]
- *
- * Mutation tools (create_routine, hire_agent, …) produce a `builder_proposal`
- * which surfaces inline next to the originating tool result with Apply /
- * Reject buttons. Governed primitives also create a row in the Approvals
- * queue (handled by the existing Approvals UI).
- */
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowUpRight,
+  Bot,
+  ChevronDown,
+  Loader2,
+  Plus,
+  Send,
+  Settings2,
+  Sparkles,
+} from "lucide-react";
+import { builderApi } from "@/api/builder";
+import {
+  ApprovalPayloadRenderer,
+  approvalLabel,
+} from "@/components/ApprovalPayload";
+import { EmptyState } from "@/components/EmptyState";
+import { EntityRow } from "@/components/EntityRow";
+import { MarkdownBody } from "@/components/MarkdownBody";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Textarea } from "@/components/ui/textarea";
+import { useBreadcrumbs } from "@/context/BreadcrumbContext";
+import { useCompany } from "@/context/CompanyContext";
+import { useToastActions } from "@/context/ToastContext";
+import { formatDateTime } from "@/lib/utils";
+import { Link } from "@/lib/router";
+import { cn } from "@/lib/utils";
 
 const QUERY_KEY = ["builder"] as const;
 
-// Get available adapters dynamically from the UI adapter registry
-function getAvailableBuilderAdapters(supportedAdapterTypes: string[]) {
-  const supported = new Set(supportedAdapterTypes);
-  const allAdapters = listUIAdapters();
-  return allAdapters.filter((adapter) => supported.has(adapter.type));
+function hasMeaningfulSessionTitle(title: string | null | undefined): boolean {
+  const normalized = (title ?? "").trim();
+  return normalized.length > 0 && normalized.toLowerCase() !== "new session";
 }
 
-// Get adapter compatibility status badge
-function getAdapterStatusBadge(adapterType: string): string {
-  // Phase 4 will add actual testing - for now mark all as experimental
-  switch (adapterType) {
-    case "claude_local":
-    case "opencode_local":
-      return "🧪 Experimental - Core functionality implemented";
-    case "codex_local":
-    case "cursor_local":
-    case "gemini_local":
-    case "pi_local":
-      return "⚠️ Untested - May require additional configuration";
-    default:
-      return "❓ Unknown compatibility status";
-  }
+function getSessionDisplayTitle(session: Pick<BuilderSession, "title" | "createdAt">): string {
+  return hasMeaningfulSessionTitle(session.title)
+    ? session.title.trim()
+    : formatDateTime(session.createdAt);
 }
 
-function formatRoleLabel(role: BuilderMessage["role"]): string {
-  switch (role) {
-    case "assistant":
-      return "AI";
-    case "user":
-      return "You";
-    case "tool":
-      return "Tool";
-    default:
-      return role;
+function getSessionSubtitle(session: Pick<BuilderSession, "updatedAt" | "effectiveRuntimeConfig">): string {
+  const model = session.effectiveRuntimeConfig?.model?.trim();
+  if (model) {
+    return `${model} · ${formatDateTime(session.updatedAt)}`;
   }
+  return formatDateTime(session.updatedAt);
 }
 
-function getApprovalBackedToolResult(toolResult: BuilderMessage["content"]["toolResult"] | undefined): {
-  approvalId: string | null;
-  requiresApproval: boolean;
-} {
-  const result = toolResult?.result;
-  if (!result || typeof result !== "object" || Array.isArray(result)) {
-    return { approvalId: null, requiresApproval: false };
-  }
-  const record = result as Record<string, unknown>;
+function buildTransientBuilderMessage(input: {
+  id: string;
+  companyId: string;
+  sessionId: string;
+  role: BuilderMessage["role"];
+  text: string;
+}): BuilderMessage {
   return {
-    approvalId: typeof record.approvalId === "string" ? record.approvalId : null,
-    requiresApproval: record.requiresApproval === true,
+    id: input.id,
+    sessionId: input.sessionId,
+    companyId: input.companyId,
+    sequence: Number.MAX_SAFE_INTEGER,
+    role: input.role,
+    content: { text: input.text },
+    inputTokens: 0,
+    outputTokens: 0,
+    costCents: 0,
+    createdAt: new Date(),
   };
 }
 
-function MessageBubble({
-  message,
-  onApplyProposal,
-  onRejectProposal,
-  proposalActionPending,
-}: {
-  message: BuilderMessage;
-  onApplyProposal?: (proposalId: string) => void;
-  onRejectProposal?: (proposalId: string) => void;
-  proposalActionPending?: string | null;
-}) {
-  const text = message.content.text ?? "";
-  const toolCalls = message.content.toolCalls ?? [];
-  const toolResult = message.content.toolResult;
-  const isUser = message.role === "user";
-  const proposalId = toolResult?.proposalId;
-  const { approvalId, requiresApproval } = getApprovalBackedToolResult(toolResult);
-  const approvalBackedProposal = Boolean(proposalId && approvalId && requiresApproval);
-
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted"
-        }`}
-      >
-        <div className="whitespace-pre-wrap">{text}</div>
-        {toolCalls.length > 0 && (
-          <div className="mt-1 space-y-1">
-            {toolCalls.map((call) => (
-              <div
-                key={call.id}
-                className="rounded bg-black/5 px-2 py-1 text-xs dark:bg-white/10"
-              >
-                <span className="font-semibold">{call.name}</span>
-                <pre className="mt-0.5 overflow-x-auto text-[10px] opacity-80">
-                  {JSON.stringify(call.arguments, null, 2)}
-                </pre>
-              </div>
-            ))}
-          </div>
-        )}
-        {toolResult && (
-          <div
-            className={`mt-1 rounded px-2 py-1 text-xs ${
-              toolResult.ok
-                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200"
-                : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200"
-            }`}
-          >
-            {toolResult.ok ? "✓" : "✗"} {toolResult.name}
-            {typeof toolResult.result === "object" && toolResult.result !== null ? (
-              <pre className="mt-0.5 overflow-x-auto text-[10px] opacity-80">
-                {JSON.stringify(toolResult.result, null, 2)}
-              </pre>
-            ) : (
-              <span className="ml-1 opacity-80">{String(toolResult.result ?? "")}</span>
-            )}
-            {proposalId && (
-              <div className="mt-1.5 flex items-center gap-2">
-                <span className="text-[10px] opacity-70">Proposal #{proposalId.slice(0, 8)}</span>
-                {onApplyProposal && onRejectProposal && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => onApplyProposal(proposalId)}
-                      disabled={proposalActionPending === proposalId}
-                      className="rounded bg-primary px-2 py-0.5 text-[10px] text-primary-foreground hover:opacity-90 disabled:opacity-50"
-                    >
-                      {proposalActionPending === proposalId ? "Applying…" : "Apply"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onRejectProposal(proposalId)}
-                      disabled={proposalActionPending === proposalId}
-                      className="rounded border border-border px-2 py-0.5 text-[10px] hover:bg-muted disabled:opacity-50"
-                    >
-                      Reject
-                    </button>
-                  </>
-                )}
-                {approvalBackedProposal && (
-                  <span className="text-[10px] opacity-70">→ Approvals queue</span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Convert stored adapterConfig to CreateConfigValues shape for the form */
-function settingsToFormValues(settings: BuilderProviderSettings | null): CreateConfigValues {
-  const config = settings?.adapterConfig ?? {};
-  return {
-    adapterType: settings?.adapterType ?? "claude_local",
-    model: (config.model as string) ?? "",
-    instructionsFilePath: (config.instructionsFilePath as string) ?? "",
-    cwd: (config.cwd as string) ?? "",
-    thinkingEffort: (config.effort as string) ?? "",
-    chrome: (config.chrome as boolean) ?? false,
-    dangerouslySkipPermissions: (config.dangerouslySkipPermissions as boolean) ?? false,
-    timeoutSec: (config.timeoutSec as number) ?? 0,
-    promptTemplate: (config.promptTemplate as string) ?? "",
-    bootstrapPrompt: (config.bootstrapPromptTemplate as string) ?? "",
-    command: (config.command as string) ?? "",
-    extraArgs: Array.isArray(config.extraArgs) ? config.extraArgs.join(", ") : "",
-    args: Array.isArray(config.args) ? config.args.join(", ") : "",
-    envBindings: (config.env as Record<string, unknown>) ?? {},
-    envVars: "",
-    search: (config.search as boolean) ?? false,
-    fastMode: (config.fastMode as boolean) ?? false,
-    dangerouslyBypassSandbox: (config.dangerouslyBypassSandbox as boolean) ?? false,
-    url: (config.url as string) ?? "",
-    accessToken: (config.accessToken as string) ?? undefined,
-    apiKey: (config.apiKey as string) ?? undefined,
-    workspaceStrategyType: (config.workspaceStrategyType as string) ?? undefined,
-    workspaceBaseRef: (config.workspaceBaseRef as string) ?? undefined,
-    workspaceBranchTemplate: (config.workspaceBranchTemplate as string) ?? undefined,
-    worktreeParentDir: (config.worktreeParentDir as string) ?? undefined,
-    payloadTemplateJson: (config.payloadTemplateJson as string) ?? undefined,
-    runtimeServicesJson: (config.runtimeServicesJson as string) ?? undefined,
-    artifactOutputsJson: (config.artifactOutputsJson as string) ?? undefined,
-    maxTurnsPerRun: (config.maxTurnsPerRun as number) ?? 10,
-    heartbeatEnabled: false,
-    intervalSec: 300,
-  };
-}
-
-function SettingsPanel({ companyId }: { companyId: string }) {
-  const queryClient = useQueryClient();
-  const toast = useToastActions();
-  
-  const toolsQuery = useQuery({
-    queryKey: [...QUERY_KEY, "tools", companyId] as const,
-    queryFn: () => builderApi.getTools(companyId),
-  });
-  
-  const settingsQuery = useQuery({
-    queryKey: [...QUERY_KEY, "settings", companyId] as const,
-    queryFn: () => builderApi.getSettings(companyId),
-  });
-
-  const [formValues, setFormValues] = useState<CreateConfigValues | null>(null);
-
-  // Get available Builder-compatible adapters dynamically
-  const availableAdapters = useMemo(
-    () => getAvailableBuilderAdapters(toolsQuery.data?.supportedAdapterTypes ?? []),
-    [toolsQuery.data?.supportedAdapterTypes],
-  );
-
-  // Get current adapter module
-  const uiAdapter = useMemo(() => {
-    if (!formValues?.adapterType) return null;
-    return getUIAdapter(formValues.adapterType);
-  }, [formValues?.adapterType]);
-
-  // Initialize form from settings
-  useEffect(() => {
-    if (settingsQuery.data) {
-      setFormValues(settingsToFormValues(settingsQuery.data.settings));
+function getPayloadSummary(payload: Record<string, unknown>): string | null {
+  const candidateKeys = [
+    "summary",
+    "title",
+    "name",
+    "recommendedAction",
+    "description",
+    "goal",
+    "role",
+  ] as const;
+  for (const key of candidateKeys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
     }
-  }, [settingsQuery.data]);
-
-  const mutation = useMutation({
-    mutationFn: async () => {
-      if (!formValues || !uiAdapter) return null;
-      
-      // Validate required fields
-      if (!formValues.model?.trim()) {
-        throw new Error("Please select a model before saving.");
-      }
-      
-      // Build final adapter config using the adapter's own buildAdapterConfig
-      const adapterConfig = uiAdapter.buildAdapterConfig(formValues);
-
-      return builderApi.updateSettings(companyId, {
-        adapterType: formValues.adapterType,
-        adapterConfig,
-      });
-    },
-    onSuccess: async () => {
-      toast.pushToast({ title: "Builder settings saved", tone: "success" });
-      await queryClient.invalidateQueries({ queryKey: [...QUERY_KEY, "settings", companyId] });
-    },
-    onError: (err) => {
-      toast.pushToast({
-        title: "Failed to save settings",
-        body: err instanceof Error ? err.message : String(err),
-        tone: "error",
-      });
-    },
-  });
-
-  if (!formValues || !toolsQuery.data) {
-    return <div className="text-xs text-muted-foreground">Loading settings…</div>;
   }
 
-  const selectedAdapter = availableAdapters.find((a) => a.type === formValues.adapterType);
+  const patch = payload.patch;
+  if (patch && typeof patch === "object" && !Array.isArray(patch)) {
+    const nextName = (patch as Record<string, unknown>).name;
+    if (typeof nextName === "string" && nextName.trim()) {
+      return `Update name to ${nextName.trim()}`;
+    }
+  }
+
+  return null;
+}
+
+function getProposalSummary(proposal: BuilderProposal): string {
+  return (
+    getPayloadSummary(proposal.payload) ??
+    approvalLabel(proposal.kind, proposal.payload).replace(/^[^:]+:\s*/, "") ??
+    proposal.kind.replace(/_/g, " ")
+  );
+}
+
+function getToolResultSummary(
+  toolResult: BuilderToolResult,
+  proposal: BuilderProposal | null,
+): string {
+  if (proposal) return getProposalSummary(proposal);
+
+  const result = toolResult.result;
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const summary = getPayloadSummary(result as Record<string, unknown>);
+    if (summary) return summary;
+  }
+
+  if (typeof result === "string" && result.trim()) {
+    return result.trim();
+  }
+
+  return toolResult.ok ? "Completed." : "Failed.";
+}
+
+function stringifyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function updateProposalCollection(
+  proposals: BuilderProposal[] | undefined,
+  nextProposal: BuilderProposal,
+): BuilderProposal[] {
+  if (!proposals) return [nextProposal];
+  const existingIndex = proposals.findIndex((proposal) => proposal.id === nextProposal.id);
+  if (existingIndex === -1) return [nextProposal, ...proposals];
+  const next = proposals.slice();
+  next[existingIndex] = nextProposal;
+  return next;
+}
+
+function updateSessionProposalState(
+  session: BuilderSessionDetail | null | undefined,
+  proposal: BuilderProposal,
+): BuilderSessionDetail | null | undefined {
+  if (!session) return session;
+  return {
+    ...session,
+    messages: session.messages.map((message) => {
+      const toolResult = message.content.toolResult;
+      if (!toolResult || toolResult.proposalId !== proposal.id) return message;
+      return {
+        ...message,
+        content: {
+          ...message.content,
+          toolResult: {
+            ...toolResult,
+            proposalStatus: proposal.status,
+            handoff: proposal.handoff ?? toolResult.handoff,
+          },
+        },
+      };
+    }),
+  };
+}
+
+function ProposalCard({
+  proposal,
+  pendingProposalId,
+  onApply,
+  onReject,
+}: {
+  proposal: BuilderProposal;
+  pendingProposalId: string | null;
+  onApply: (proposalId: string) => void;
+  onReject: (proposalId: string) => void;
+}) {
+  const approvalBacked = Boolean(proposal.approvalId);
+  const canApplyInline =
+    !approvalBacked &&
+    (proposal.status === "pending" || proposal.status === "approved");
+  const detailsTitle = approvalBacked ? "Review governed payload" : "Review proposal details";
 
   return (
-    <div className="space-y-4 text-sm">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-        <SettingsIcon className="h-3.5 w-3.5" /> Configuration
-      </div>
-
-      <label className="block text-xs">
-        Adapter Type
-        <select
-          className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm"
-          value={formValues.adapterType}
-          onChange={(e) => {
-            const newAdapterType = e.target.value;
-            setFormValues({
-              ...settingsToFormValues(null),
-              adapterType: newAdapterType,
-            });
-          }}
-        >
-          {availableAdapters.map((adapter) => (
-            <option key={adapter.type} value={adapter.type}>
-              {adapter.label}
-            </option>
-          ))}
-        </select>
-        {selectedAdapter && (
-          <div className="mt-1 text-[10px] text-muted-foreground">
-            {getAdapterStatusBadge(formValues.adapterType)}
-          </div>
-        )}
-      </label>
-
-      {/* Use AgentConfigForm in create mode to render adapter config fields */}
-      <div className="border-t border-border pt-3">
-        <AgentConfigForm
-          mode="create"
-          values={formValues}
-          onChange={(patch) => setFormValues((prev) => prev ? { ...prev, ...patch } : null)}
-          hideInlineSave
-          showAdapterTypeField={false}
-          showAdapterTestEnvironmentButton={false}
-          showCreateRunPolicySection={false}
-          hideInstructionsFile
-        />
-      </div>
-
-      <Button
-        onClick={() => mutation.mutate()}
-        disabled={mutation.isPending}
-        size="sm"
-        className="w-full"
-      >
-        {mutation.isPending ? "Saving…" : "Save settings"}
-      </Button>
-      
-      {!formValues.model?.trim() && (
-        <div className="text-xs text-amber-600 dark:text-amber-400">
-          ⚠️ Please select a model above to save settings
+    <div className="mt-3 rounded-xl border border-border/70 bg-background/70 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-sm font-medium text-foreground">
+          {getProposalSummary(proposal)}
         </div>
-      )}
+        <StatusBadge status={proposal.status} />
+      </div>
+
+      <p className="mt-2 text-sm text-muted-foreground">
+        {approvalBacked
+          ? "This action is governed. Continue from the standard approvals queue."
+          : "This is a transcript-linked proposal. Apply inline only when the action is local and safe."}
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {canApplyInline ? (
+          <>
+            <Button
+              size="sm"
+              onClick={() => onApply(proposal.id)}
+              disabled={pendingProposalId === proposal.id}
+            >
+              {pendingProposalId === proposal.id ? "Applying..." : "Apply"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onReject(proposal.id)}
+              disabled={pendingProposalId === proposal.id}
+            >
+              Reject
+            </Button>
+          </>
+        ) : null}
+
+        {proposal.handoff?.href ? (
+          <Button asChild size="sm" variant={canApplyInline ? "ghost" : "outline"}>
+            <Link to={proposal.handoff.href}>
+              {proposal.handoff.label}
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>
+          </Button>
+        ) : null}
+      </div>
+
+      {proposal.failureReason ? (
+        <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+          {proposal.failureReason}
+        </div>
+      ) : null}
+
+      <Collapsible className="mt-3">
+        <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-left text-sm text-foreground hover:bg-accent/40">
+          <span>{detailsTitle}</span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-3 px-1 pt-3">
+          <div className="rounded-xl border border-border/70 bg-card p-4">
+            <ApprovalPayloadRenderer
+              type={proposal.kind}
+              payload={proposal.payload}
+              hidePrimaryTitle
+            />
+          </div>
+          <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Raw payload
+            </div>
+            <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-muted-foreground">
+              {stringifyJson(proposal.payload)}
+            </pre>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   );
 }
 
-function ToolList({ companyId }: { companyId: string }) {
-  const toolsQuery = useQuery({
-    queryKey: [...QUERY_KEY, "tools", companyId] as const,
-    queryFn: () => builderApi.getTools(companyId),
-  });
-  if (!toolsQuery.data) {
-    return <div className="text-xs text-muted-foreground">Loading tools…</div>;
-  }
+function ToolCallList({
+  toolCalls,
+}: {
+  toolCalls: BuilderMessage["content"]["toolCalls"];
+}) {
+  if (!toolCalls?.length) return null;
+
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-        <Wrench className="h-3.5 w-3.5" /> Available tools
-      </div>
-      {toolsQuery.data.tools.map((tool) => (
-        <div key={tool.name} className="rounded border border-border px-2 py-1.5 text-xs">
-          <div className="font-mono">{tool.name}</div>
-          <div className="text-muted-foreground">{tool.description}</div>
-          <div className="mt-1 text-[10px] uppercase tracking-wide opacity-60">
-            {tool.capability} · {tool.requiresApproval ? "approval-gated" : "direct"}
-          </div>
-        </div>
+    <div className="mt-3 space-y-2">
+      {toolCalls.map((call) => (
+        <Collapsible
+          key={call.id}
+          className="rounded-xl border border-border/70 bg-background/60"
+        >
+          <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-accent/40">
+            <div className="flex items-center gap-2">
+              <StatusBadge status="planned" />
+              <span className="font-medium text-foreground">{call.name}</span>
+            </div>
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="px-3 pb-3">
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+              {stringifyJson(call.arguments)}
+            </pre>
+          </CollapsibleContent>
+        </Collapsible>
       ))}
     </div>
   );
 }
 
-function ChatPanel({
+function ToolResultCard({
+  toolResult,
+  proposal,
+  pendingProposalId,
+  onApplyProposal,
+  onRejectProposal,
+}: {
+  toolResult: BuilderToolResult;
+  proposal: BuilderProposal | null;
+  pendingProposalId: string | null;
+  onApplyProposal: (proposalId: string) => void;
+  onRejectProposal: (proposalId: string) => void;
+}) {
+  const summary = getToolResultSummary(toolResult, proposal);
+  const status = proposal?.status ?? (toolResult.ok ? "completed" : "failed");
+  const handoff = proposal?.handoff ?? toolResult.handoff ?? null;
+
+  return (
+    <div className="mt-3 rounded-2xl border border-border/70 bg-card p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-foreground">{toolResult.name}</span>
+        <StatusBadge status={status} />
+      </div>
+
+      <p className="mt-2 text-sm text-foreground/90">{summary}</p>
+
+      {handoff?.href && !proposal ? (
+        <div className="mt-3">
+          <Button asChild size="sm" variant="outline">
+            <Link to={handoff.href}>
+              {handoff.label}
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>
+          </Button>
+        </div>
+      ) : null}
+
+      {proposal ? (
+        <ProposalCard
+          proposal={proposal}
+          pendingProposalId={pendingProposalId}
+          onApply={onApplyProposal}
+          onReject={onRejectProposal}
+        />
+      ) : null}
+
+      <Collapsible className="mt-3">
+        <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-border/70 px-3 py-2 text-left text-sm text-foreground hover:bg-accent/40">
+          <span>View raw tool result</span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-1 pt-3">
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+            {stringifyJson(toolResult.result)}
+          </pre>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
+
+function MessageCard({
+  message,
+  proposal,
+  pendingProposalId,
+  onApplyProposal,
+  onRejectProposal,
+  pendingLabel,
+  showSpinner = false,
+}: {
+  message: BuilderMessage;
+  proposal: BuilderProposal | null;
+  pendingProposalId: string | null;
+  onApplyProposal: (proposalId: string) => void;
+  onRejectProposal: (proposalId: string) => void;
+  pendingLabel?: string | null;
+  showSpinner?: boolean;
+}) {
+  const isUser = message.role === "user";
+  const roleLabel =
+    message.role === "assistant"
+      ? "AI Builder"
+      : message.role === "tool"
+        ? "Tool result"
+        : "You";
+
+  return (
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "w-full max-w-3xl rounded-2xl border p-4 shadow-sm",
+          isUser
+            ? "border-primary/20 bg-primary/5"
+            : "border-border/70 bg-card",
+        )}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {!isUser ? <Bot className="h-4 w-4 text-muted-foreground" /> : null}
+            <span className="text-sm font-medium text-foreground">{roleLabel}</span>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {formatDateTime(message.createdAt)}
+          </span>
+        </div>
+
+        {message.content.text ? (
+          <div className="mt-3 text-sm text-foreground">
+            <MarkdownBody className="prose prose-sm max-w-none dark:prose-invert">
+              {message.content.text}
+            </MarkdownBody>
+          </div>
+        ) : null}
+
+        <ToolCallList toolCalls={message.content.toolCalls} />
+
+        {message.content.toolResult ? (
+          <ToolResultCard
+            toolResult={message.content.toolResult}
+            proposal={proposal}
+            pendingProposalId={pendingProposalId}
+            onApplyProposal={onApplyProposal}
+            onRejectProposal={onRejectProposal}
+          />
+        ) : null}
+
+        {pendingLabel ? (
+          <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+            {showSpinner ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            <span>{pendingLabel}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ConversationPane({
   companyId,
   session,
-  refresh,
+  onBusyChange,
 }: {
   companyId: string;
   session: BuilderSessionDetail;
-  refresh: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
-  const [input, setInput] = useState("");
-  const [proposalActionPending, setProposalActionPending] = useState<string | null>(null);
-  const toast = useToastActions();
   const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: async (text: string) => builderApi.sendMessage(companyId, session.id, { text }),
+  const toast = useToastActions();
+  const [input, setInput] = useState("");
+  const [pendingProposalId, setPendingProposalId] = useState<string | null>(null);
+  const [pendingUserText, setPendingUserText] = useState<string | null>(null);
+  const [pendingAssistant, setPendingAssistant] = useState(false);
+  const [streamMessages, setStreamMessages] = useState<BuilderMessage[]>([]);
+
+  const sessionQueryKey = [...QUERY_KEY, "session", companyId, session.id] as const;
+  const proposalsQueryKey = [...QUERY_KEY, "proposals", companyId, session.id] as const;
+
+  const proposalsQuery = useQuery({
+    queryKey: proposalsQueryKey,
+    queryFn: () => builderApi.listProposals(companyId, { sessionId: session.id }),
+  });
+
+  const proposalsById = useMemo(
+    () =>
+      new Map(
+        (proposalsQuery.data?.proposals ?? []).map((proposal) => [proposal.id, proposal]),
+      ),
+    [proposalsQuery.data?.proposals],
+  );
+
+  const appendStreamMessage = (message: BuilderMessage) => {
+    setStreamMessages((current) => {
+      const withoutDuplicate = current.filter((existing) => existing.id !== message.id);
+      return [...withoutDuplicate, message].sort((a, b) => a.sequence - b.sequence);
+    });
+  };
+
+  const displayedMessages = useMemo(() => {
+    const merged = new Map<string, BuilderMessage>();
+    for (const message of session.messages) merged.set(message.id, message);
+    for (const message of streamMessages) merged.set(message.id, message);
+    return Array.from(merged.values()).sort((a, b) => a.sequence - b.sequence);
+  }, [session.messages, streamMessages]);
+
+  const hasLiveAssistantMessage = streamMessages.some((message) => message.role !== "user");
+  const isArchived = Boolean(session.archivedAt);
+
+  useEffect(() => {
+    setPendingUserText(null);
+    setPendingAssistant(false);
+    setStreamMessages([]);
+  }, [session.id]);
+
+  const submitInput = () => {
+    const text = input.trim();
+    if (!text || composerDisabled) return;
+    sendMutation.mutate(text);
+  };
+
+  const sendMutation = useMutation({
+    mutationFn: async (text: string) =>
+      builderApi.streamMessage(companyId, session.id, { text }, {
+        onStart: () => setPendingAssistant(true),
+        onUserMessage: (message) => {
+          setPendingUserText(null);
+          appendStreamMessage(message);
+        },
+        onMessage: (message) => {
+          appendStreamMessage(message);
+        },
+        onDone: () => setPendingAssistant(false),
+        onError: () => setPendingAssistant(false),
+      }),
+    onMutate: async (text: string) => {
+      setPendingUserText(text);
+      setPendingAssistant(true);
+      setStreamMessages([]);
+    },
     onSuccess: async () => {
       setInput("");
+      setPendingUserText(null);
+      setPendingAssistant(false);
+      setStreamMessages([]);
+      await queryClient.invalidateQueries({ queryKey: sessionQueryKey });
       await queryClient.invalidateQueries({
-        queryKey: [...QUERY_KEY, "session", companyId, session.id],
+        queryKey: [...QUERY_KEY, "sessions", companyId],
       });
-      refresh();
+      await queryClient.invalidateQueries({ queryKey: proposalsQueryKey });
     },
-    onError: (err) => {
+    onError: (error) => {
+      setPendingUserText(null);
+      setPendingAssistant(false);
+      setStreamMessages([]);
       toast.pushToast({
         title: "Failed to send message",
-        body: err instanceof Error ? err.message : String(err),
+        body: error instanceof Error ? error.message : String(error),
         tone: "error",
       });
     },
   });
 
-  const decideProposal = async (
-    proposalId: string,
-    action: "apply" | "reject",
-  ) => {
-    setProposalActionPending(proposalId);
+  useEffect(() => {
+    onBusyChange?.(sendMutation.isPending);
+  }, [onBusyChange, sendMutation.isPending]);
+
+  const composerDisabled = sendMutation.isPending || session.state !== "active" || isArchived;
+  const canSubmit = Boolean(input.trim()) && !composerDisabled;
+
+  const decideProposal = async (proposalId: string, action: "apply" | "reject") => {
+    setPendingProposalId(proposalId);
     try {
-      if (action === "apply") {
-        await builderApi.applyProposal(companyId, proposalId);
-        toast.pushToast({
-          title: "Proposal applied",
-          body: "The proposal has been applied to your company.",
-          tone: "success",
-        });
-      } else {
-        await builderApi.rejectProposal(companyId, proposalId);
-        toast.pushToast({
-          title: "Proposal rejected",
-          body: "The proposal has been rejected.",
-          tone: "info",
-        });
-      }
-      await queryClient.invalidateQueries({
-        queryKey: [...QUERY_KEY, "session", companyId, session.id],
+      const response =
+        action === "apply"
+          ? await builderApi.applyProposal(companyId, proposalId)
+          : await builderApi.rejectProposal(companyId, proposalId);
+
+      queryClient.setQueryData<{ proposals: BuilderProposal[] } | undefined>(
+        proposalsQueryKey,
+        (current) => ({
+          proposals: updateProposalCollection(current?.proposals, response.proposal),
+        }),
+      );
+      queryClient.setQueryData<{ session: BuilderSessionDetail | null } | undefined>(
+        sessionQueryKey,
+        (current) => ({
+          session: updateSessionProposalState(current?.session, response.proposal) ?? null,
+        }),
+      );
+
+      toast.pushToast({
+        title: action === "apply" ? "Proposal applied" : "Proposal rejected",
+        tone: action === "apply" ? "success" : "info",
       });
-      refresh();
-    } catch (err) {
+    } catch (error) {
       toast.pushToast({
         title: action === "apply" ? "Failed to apply proposal" : "Failed to reject proposal",
-        body: err instanceof Error ? err.message : String(err),
+        body: error instanceof Error ? error.message : String(error),
         tone: "error",
       });
     } finally {
-      setProposalActionPending(null);
+      setPendingProposalId(null);
     }
   };
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-3 overflow-y-auto pr-2">
-        {session.messages.length === 0 ? (
+      <div className="flex-1 space-y-4 overflow-y-auto pr-2">
+        {isArchived ? (
+          <div className="rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            Archived sessions are read-only until restored.
+          </div>
+        ) : null}
+
+        {displayedMessages.length === 0 && !pendingUserText && !pendingAssistant ? (
           <EmptyState
             icon={Sparkles}
-            message="Ask anything about this company. Try: 'list my agents and which routines are paused'"
+            message="Ask about your company, draft changes, or start a governed workflow."
           />
         ) : (
-          session.messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              message={msg}
-              onApplyProposal={(id) => decideProposal(id, "apply")}
-              onRejectProposal={(id) => decideProposal(id, "reject")}
-              proposalActionPending={proposalActionPending}
-            />
-          ))
+          <>
+            {displayedMessages.map((message) => {
+              const proposalId = message.content.toolResult?.proposalId ?? null;
+              const proposal = proposalId ? proposalsById.get(proposalId) ?? null : null;
+              return (
+                <MessageCard
+                  key={message.id}
+                  message={message}
+                  proposal={proposal}
+                  pendingProposalId={pendingProposalId}
+                  onApplyProposal={(id) => decideProposal(id, "apply")}
+                  onRejectProposal={(id) => decideProposal(id, "reject")}
+                />
+              );
+            })}
+
+            {pendingUserText ? (
+              <MessageCard
+                message={buildTransientBuilderMessage({
+                  id: "__pending_user__",
+                  companyId,
+                  sessionId: session.id,
+                  role: "user",
+                  text: pendingUserText,
+                })}
+                proposal={null}
+                pendingProposalId={pendingProposalId}
+                onApplyProposal={() => undefined}
+                onRejectProposal={() => undefined}
+                pendingLabel="Sending..."
+              />
+            ) : null}
+
+            {pendingAssistant && !hasLiveAssistantMessage ? (
+              <MessageCard
+                message={buildTransientBuilderMessage({
+                  id: "__pending_assistant__",
+                  companyId,
+                  sessionId: session.id,
+                  role: "assistant",
+                  text: "AI Builder is working through the next step.",
+                })}
+                proposal={null}
+                pendingProposalId={pendingProposalId}
+                onApplyProposal={() => undefined}
+                onRejectProposal={() => undefined}
+                pendingLabel="Waiting for response..."
+                showSpinner
+              />
+            ) : null}
+          </>
         )}
       </div>
+
       <form
-        className="mt-3 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const text = input.trim();
-          if (!text || mutation.isPending) return;
-          mutation.mutate(text);
+        className="mt-4 flex items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitInput();
         }}
       >
-        <input
-          className="flex-1 rounded border border-border bg-background px-3 py-2 text-sm"
+        <Textarea
+          className="max-h-40 min-h-[3.25rem] flex-1 rounded-xl px-4 py-3 text-sm"
           placeholder="Ask the AI Builder…"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={mutation.isPending || session.state !== "active"}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+            if (event.shiftKey) return;
+            event.preventDefault();
+            submitInput();
+          }}
+          disabled={composerDisabled}
         />
         <Button
           type="submit"
-          size="sm"
-          disabled={!input.trim() || mutation.isPending || session.state !== "active"}
+          disabled={!canSubmit}
         >
-          {mutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          {sendMutation.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
         </Button>
       </form>
     </div>
   );
 }
 
+function RuntimeSummaryCard({
+  runtime,
+  messageCount,
+  pendingProposals,
+}: {
+  runtime: BuilderSession["effectiveRuntimeConfig"] | null | undefined;
+  messageCount: number;
+  pendingProposals: number;
+}) {
+  return (
+    <Card className="border-border/70">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Settings2 className="h-4 w-4" />
+          Live runtime
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="rounded-xl border border-border/70 bg-muted/20 px-3 py-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            Current adapter
+          </div>
+          <div className="mt-1 font-medium text-foreground">
+            {runtime?.adapterType ?? "Not configured"}
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {runtime?.model?.trim() || "No model selected"}
+          </div>
+          {runtime?.updatedAt ? (
+            <div className="mt-2 text-xs text-muted-foreground">
+              Updated {formatDateTime(runtime.updatedAt)}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="rounded-xl border border-border/70 bg-card px-3 py-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            Session context
+          </div>
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Transcript messages</span>
+            <span className="font-medium text-foreground">{messageCount}</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Pending proposals</span>
+            <span className="font-medium text-foreground">{pendingProposals}</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-sm text-foreground">
+          Old sessions still run with the current company Builder settings on their next turn.
+        </div>
+
+        <Button asChild variant="outline" className="w-full">
+          <Link to="/company/settings/builder">
+            Open Builder settings
+            <ArrowUpRight className="h-4 w-4" />
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function WorkflowCard({
+  handoff,
+}: {
+  handoff: BuilderHandoffTarget | null;
+}) {
+  return (
+    <Card className="border-border/70">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Workflow</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm text-muted-foreground">
+        <p>
+          Start work here, then continue governed or multi-step actions in the standard surface.
+        </p>
+        <p>
+          Direct actions stay inline only when the change is local and safe.
+        </p>
+        {handoff?.href ? (
+          <Button asChild size="sm" variant="outline" className="w-full">
+            <Link to={handoff.href}>
+              {handoff.label}
+              <ArrowUpRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SessionRowAction({
+  label,
+  icon,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  icon: ReactNode;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {icon}
+    </Button>
+  );
+}
+
 export function CompanyBuilder() {
-  const { selectedCompanyId } = useCompany();
+  const { selectedCompany, selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
   const queryClient = useQueryClient();
   const toast = useToastActions();
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [archivedSectionOpen, setArchivedSectionOpen] = useState(false);
+  const [sidebarBusy, setSidebarBusy] = useState(false);
 
   useEffect(() => {
-    setBreadcrumbs([{ label: "AI Builder" }]);
-  }, [setBreadcrumbs]);
+    setBreadcrumbs([
+      { label: selectedCompany?.name ?? "Company", href: "/dashboard" },
+      { label: "AI Builder" },
+    ]);
+  }, [selectedCompany?.name, setBreadcrumbs]);
 
   const sessionsQuery = useQuery({
     queryKey: [...QUERY_KEY, "sessions", selectedCompanyId] as const,
     queryFn: () =>
-      selectedCompanyId ? builderApi.listSessions(selectedCompanyId) : Promise.resolve({ sessions: [] }),
+      selectedCompanyId
+        ? builderApi.listSessions(selectedCompanyId, { includeArchived: true })
+        : Promise.resolve({ sessions: [] }),
     enabled: !!selectedCompanyId,
   });
 
@@ -525,7 +861,7 @@ export function CompanyBuilder() {
   const createMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCompanyId) return null;
-      return builderApi.createSession(selectedCompanyId, { title: "New session" });
+      return builderApi.createSession(selectedCompanyId, {});
     },
     onSuccess: async (created) => {
       if (!created) return;
@@ -534,86 +870,242 @@ export function CompanyBuilder() {
         queryKey: [...QUERY_KEY, "sessions", selectedCompanyId],
       });
     },
-    onError: (err) => {
+    onError: (error) => {
       toast.pushToast({
         title: "Failed to create session",
-        body: err instanceof Error ? err.message : String(err),
+        body: error instanceof Error ? error.message : String(error),
         tone: "error",
       });
     },
   });
 
-  const sessions: BuilderSession[] = sessionsQuery.data?.sessions ?? [];
+  const archiveMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      if (!selectedCompanyId) return null;
+      return builderApi.archiveSession(selectedCompanyId, sessionId);
+    },
+    onSuccess: async () => {
+      setArchivedSectionOpen(true);
+      await queryClient.invalidateQueries({
+        queryKey: [...QUERY_KEY, "sessions", selectedCompanyId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: [...QUERY_KEY, "session", selectedCompanyId, activeSessionId],
+      });
+    },
+    onError: (error) => {
+      toast.pushToast({
+        title: "Failed to archive session",
+        body: error instanceof Error ? error.message : String(error),
+        tone: "error",
+      });
+    },
+  });
 
-  // Auto-select the first session on load.
+  const restoreMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      if (!selectedCompanyId) return null;
+      return builderApi.restoreSession(selectedCompanyId, sessionId);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: [...QUERY_KEY, "sessions", selectedCompanyId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: [...QUERY_KEY, "session", selectedCompanyId, activeSessionId],
+      });
+    },
+    onError: (error) => {
+      toast.pushToast({
+        title: "Failed to restore session",
+        body: error instanceof Error ? error.message : String(error),
+        tone: "error",
+      });
+    },
+  });
+
+  const sessions = sessionsQuery.data?.sessions ?? [];
+  const activeSessions = sessions.filter((session) => !session.archivedAt);
+  const archivedSessions = sessions.filter((session) => Boolean(session.archivedAt));
+  const sessionActionPendingId = archiveMutation.isPending
+    ? archiveMutation.variables
+    : restoreMutation.isPending
+      ? restoreMutation.variables
+      : null;
+  const sessionActionBusy =
+    sidebarBusy || archiveMutation.isPending || restoreMutation.isPending;
+
   useEffect(() => {
-    if (!activeSessionId && sessions[0]) setActiveSessionId(sessions[0].id);
+    if (!sessions.length) {
+      setActiveSessionId(null);
+      return;
+    }
+    if (!activeSessionId || !sessions.some((session) => session.id === activeSessionId)) {
+      setActiveSessionId(sessions[0]?.id ?? null);
+    }
   }, [activeSessionId, sessions]);
 
-  const detail = useMemo(
-    () => sessionDetailQuery.data?.session ?? null,
-    [sessionDetailQuery.data],
-  );
+  const detail = sessionDetailQuery.data?.session ?? null;
+  const activeSession =
+    sessions.find((session) => session.id === activeSessionId) ?? null;
+  const effectiveRuntimeConfig =
+    detail?.effectiveRuntimeConfig ?? activeSession?.effectiveRuntimeConfig ?? null;
+
+  const lastHandoff = useMemo(() => {
+    if (!detail) return null;
+    const messages = [...detail.messages].reverse();
+    for (const message of messages) {
+      const handoff = message.content.toolResult?.handoff;
+      if (handoff?.href) return handoff;
+    }
+    return null;
+  }, [detail]);
 
   if (!selectedCompanyId) {
-    return <div className="text-sm text-muted-foreground">Select a company to use the AI Builder.</div>;
+    return (
+      <div className="text-sm text-muted-foreground">
+        Select a company to use the AI Builder.
+      </div>
+    );
   }
 
   return (
-    <div className="grid h-full gap-4 lg:grid-cols-[220px_1fr_280px]">
-      <Card className="overflow-hidden">
-        <CardContent className="space-y-2 p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Sessions</div>
-            <Button size="sm" variant="ghost" onClick={() => createMutation.mutate()}>
-              + New
+    <div className="grid h-full gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
+      <Card className="overflow-hidden border-border/70">
+        <CardHeader className="border-b border-border/70 pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-sm">Sessions</CardTitle>
+            <Button size="sm" variant="outline" onClick={() => createMutation.mutate()}>
+              {createMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+              New
             </Button>
           </div>
+        </CardHeader>
+        <CardContent className="p-0">
           {sessions.length === 0 ? (
-            <div className="text-xs text-muted-foreground">No sessions yet.</div>
+            <div className="p-4 text-sm text-muted-foreground">
+              No sessions yet. Start one to plan, draft, or launch company work.
+            </div>
           ) : (
-            sessions.map((session) => (
-              <button
-                key={session.id}
-                type="button"
-                onClick={() => setActiveSessionId(session.id)}
-                className={`block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
-                  session.id === activeSessionId ? "bg-muted font-medium" : ""
-                }`}
-              >
-                <div className="truncate">{session.title || "Untitled session"}</div>
-                <div className="text-[10px] text-muted-foreground">
-                  {session.model} · {session.state}
+            <div>
+              <div className="border-b border-border/70 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Active
+              </div>
+              {activeSessions.length === 0 ? (
+                <div className="border-b border-border/70 px-4 py-3 text-sm text-muted-foreground">
+                  No active sessions.
                 </div>
-              </button>
-            ))
+              ) : (
+                activeSessions.map((session) => (
+                  <EntityRow
+                    key={session.id}
+                    title={getSessionDisplayTitle(session)}
+                    subtitle={getSessionSubtitle(session)}
+                    selected={session.id === activeSessionId}
+                    onClick={() => setActiveSessionId(session.id)}
+                    trailing={(
+                      <>
+                        <StatusBadge status={session.state} />
+                        <SessionRowAction
+                          label="Archive session"
+                          icon={archiveMutation.isPending && sessionActionPendingId === session.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Archive className="h-4 w-4" />
+                          )}
+                          disabled={sessionActionBusy}
+                          onClick={() => archiveMutation.mutate(session.id)}
+                        />
+                      </>
+                    )}
+                    className="py-3"
+                  />
+                ))
+              )}
+
+              {archivedSessions.length > 0 ? (
+                <Collapsible
+                  open={archivedSectionOpen}
+                  onOpenChange={setArchivedSectionOpen}
+                >
+                  <CollapsibleTrigger className="flex w-full items-center justify-between border-b border-border/70 px-4 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground hover:bg-accent/40">
+                    <span>Archived</span>
+                    <div className="flex items-center gap-2">
+                      <span>{archivedSessions.length}</span>
+                      <ChevronDown className={cn("h-4 w-4 transition-transform", archivedSectionOpen ? "rotate-180" : "")} />
+                    </div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    {archivedSessions.map((session) => (
+                      <EntityRow
+                        key={session.id}
+                        title={getSessionDisplayTitle(session)}
+                        subtitle={getSessionSubtitle(session)}
+                        selected={session.id === activeSessionId}
+                        onClick={() => setActiveSessionId(session.id)}
+                        trailing={(
+                          <>
+                            <StatusBadge status="archived" />
+                            <SessionRowAction
+                              label="Restore session"
+                              icon={restoreMutation.isPending && sessionActionPendingId === session.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <ArchiveRestore className="h-4 w-4" />
+                              )}
+                              disabled={sessionActionBusy}
+                              onClick={() => restoreMutation.mutate(session.id)}
+                            />
+                          </>
+                        )}
+                        className="py-3"
+                      />
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+              ) : null}
+            </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
-        <CardContent className="flex h-[70vh] flex-col p-3">
+      <Card className="overflow-hidden border-border/70">
+        <CardHeader className="border-b border-border/70 pb-3">
+          <CardTitle className="text-sm">
+            {activeSession ? getSessionDisplayTitle(activeSession) : "Conversation"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="h-[78vh] p-4">
           {detail ? (
-            <ChatPanel
+            <ConversationPane
               companyId={selectedCompanyId}
               session={detail}
-              refresh={() => sessionDetailQuery.refetch()}
+              onBusyChange={setSidebarBusy}
             />
           ) : (
             <EmptyState
               icon={Sparkles}
-              message="No session selected. Create one to start chatting with your company's AI Builder."
+              message="No session selected. Create one to start a Builder conversation."
             />
           )}
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
-        <CardContent className="h-[70vh] space-y-4 overflow-y-auto p-3">
-          <SettingsPanel companyId={selectedCompanyId} />
-          <ToolList companyId={selectedCompanyId} />
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <RuntimeSummaryCard
+          runtime={effectiveRuntimeConfig}
+          messageCount={detail?.messages.length ?? 0}
+          pendingProposals={detail?.messages.filter((message) => {
+            const status = message.content.toolResult?.proposalStatus;
+            return status === "pending" || status === "approved";
+          }).length ?? 0}
+        />
+        <WorkflowCard handoff={lastHandoff} />
+      </div>
     </div>
   );
 }

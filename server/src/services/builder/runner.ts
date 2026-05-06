@@ -241,6 +241,7 @@ export async function runBuilderTurn(opts: {
             result: result.ok ? result.result : { error: result.error },
             ...(result.ok && result.proposalId ? { proposalId: result.proposalId } : {}),
             ...(result.ok && result.activityId ? { activityId: result.activityId } : {}),
+            ...(result.ok && result.handoff ? { handoff: result.handoff } : {}),
           },
         },
         inputTokens: 0,

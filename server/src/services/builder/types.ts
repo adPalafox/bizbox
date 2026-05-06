@@ -1,5 +1,6 @@
 import type {
   BuilderMessage,
+  BuilderHandoffTarget,
   BuilderToolDescriptor,
 } from "@paperclipai/shared";
 import type { Db } from "@paperclipai/db";
@@ -42,6 +43,8 @@ export interface BuilderToolRunSuccess {
   proposalId?: string;
   /** Optional activity-log id for direct mutations. */
   activityId?: string;
+  /** Optional handoff target surfaced back to the operator UI. */
+  handoff?: BuilderHandoffTarget | null;
 }
 
 /** Failure result; never throws past the registry. */

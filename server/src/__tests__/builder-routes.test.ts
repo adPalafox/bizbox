@@ -10,10 +10,16 @@ const mockBuilderService = vi.hoisted(() => ({
   getSessionDetail: vi.fn(),
   createSession: vi.fn(),
   abortSession: vi.fn(),
+  archiveSession: vi.fn(),
+  restoreSession: vi.fn(),
   sendMessage: vi.fn(),
   getSettings: vi.fn(),
   upsertSettings: vi.fn(),
   getToolCatalog: vi.fn(),
+  listProposals: vi.fn(),
+  getProposal: vi.fn(),
+  applyProposal: vi.fn(),
+  rejectProposal: vi.fn(),
 }));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
@@ -67,6 +73,7 @@ describe("builder routes", () => {
       builderEnabled: true,
     });
     mockBuilderService.listSessions.mockResolvedValue([]);
+    mockBuilderService.listProposals.mockResolvedValue([]);
     mockBuilderService.getSettings.mockResolvedValue(null);
     mockBuilderService.getToolCatalog.mockReturnValue({ tools: [] });
     mockBuilderService.createSession.mockResolvedValue({
@@ -76,6 +83,7 @@ describe("builder routes", () => {
       model: "gpt-test",
       adapterType: "claude_local",
       state: "active",
+      archivedAt: null,
       createdByUserId: "board-user",
       inputTokensTotal: 0,
       outputTokensTotal: 0,
@@ -88,6 +96,36 @@ describe("builder routes", () => {
       newMessages: [{ id: "a1" }],
       usage: { inputTokens: 1, outputTokens: 2, costCents: 0 },
       truncated: false,
+    });
+    mockBuilderService.archiveSession.mockResolvedValue({
+      id: sessionId,
+      companyId,
+      title: "test",
+      model: "gpt-test",
+      adapterType: "claude_local",
+      state: "active",
+      archivedAt: new Date(),
+      createdByUserId: "board-user",
+      inputTokensTotal: 0,
+      outputTokensTotal: 0,
+      costCentsTotal: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    mockBuilderService.restoreSession.mockResolvedValue({
+      id: sessionId,
+      companyId,
+      title: "test",
+      model: "gpt-test",
+      adapterType: "claude_local",
+      state: "active",
+      archivedAt: null,
+      createdByUserId: "board-user",
+      inputTokensTotal: 0,
+      outputTokensTotal: 0,
+      costCentsTotal: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
     mockLogActivity.mockResolvedValue(undefined);
   });
@@ -116,7 +154,27 @@ describe("builder routes", () => {
     const res = await request(app).get(`/api/companies/${companyId}/builder/sessions`);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ sessions: [] });
-    expect(mockBuilderService.listSessions).toHaveBeenCalledWith(companyId);
+    expect(mockBuilderService.listSessions).toHaveBeenCalledWith(companyId, {
+      includeArchived: false,
+    });
+  });
+
+  it("passes includeArchived through when requested", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "session",
+      isInstanceAdmin: false,
+      companyIds: [companyId],
+      memberships: [{ companyId, status: "active", membershipRole: "owner" }],
+    });
+    const res = await request(app).get(
+      `/api/companies/${companyId}/builder/sessions?includeArchived=true`,
+    );
+    expect(res.status).toBe(200);
+    expect(mockBuilderService.listSessions).toHaveBeenCalledWith(companyId, {
+      includeArchived: true,
+    });
   });
 
   it("rejects board users without company access", async () => {
@@ -199,6 +257,46 @@ describe("builder routes", () => {
     );
   });
 
+  it("archives a session and logs activity", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+    const res = await request(app)
+      .post(`/api/companies/${companyId}/builder/sessions/${sessionId}/archive`);
+    expect(res.status).toBe(200);
+    expect(mockBuilderService.archiveSession).toHaveBeenCalledWith(companyId, sessionId);
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "builder.session.archived",
+        entityId: sessionId,
+      }),
+    );
+  });
+
+  it("restores a session and logs activity", async () => {
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+    const res = await request(app)
+      .post(`/api/companies/${companyId}/builder/sessions/${sessionId}/restore`);
+    expect(res.status).toBe(200);
+    expect(mockBuilderService.restoreSession).toHaveBeenCalledWith(companyId, sessionId);
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "builder.session.restored",
+        entityId: sessionId,
+      }),
+    );
+  });
+
   it("validates settings update payload", async () => {
     const app = await createApp({
       type: "board",
@@ -211,5 +309,57 @@ describe("builder routes", () => {
       .send({ adapterType: "", adapterConfig: {} });
     expect(res.status).toBe(400);
     expect(mockBuilderService.upsertSettings).not.toHaveBeenCalled();
+  });
+
+  it("lists proposals with additive handoff metadata", async () => {
+    mockBuilderService.listProposals.mockResolvedValue([
+      {
+        id: "proposal-1",
+        companyId,
+        sessionId,
+        messageId: "message-1",
+        kind: "hire_agent",
+        payload: { name: "Carmen" },
+        status: "pending",
+        appliedActivityId: null,
+        approvalId: "approval-1",
+        decidedByUserId: null,
+        decidedAt: null,
+        failureReason: null,
+        handoff: {
+          kind: "approval",
+          label: "Review approval",
+          href: "/approvals/approval-1",
+          approvalId: "approval-1",
+        },
+        createdAt: new Date("2026-05-06T10:00:00.000Z"),
+        updatedAt: new Date("2026-05-06T10:00:00.000Z"),
+      },
+    ]);
+
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+    const res = await request(app).get(
+      `/api/companies/${companyId}/builder/proposals?sessionId=${sessionId}`,
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockBuilderService.listProposals).toHaveBeenCalledWith(companyId, {
+      sessionId,
+      status: undefined,
+    });
+    expect(res.body.proposals[0]).toEqual(
+      expect.objectContaining({
+        id: "proposal-1",
+        handoff: expect.objectContaining({
+          kind: "approval",
+          href: "/approvals/approval-1",
+        }),
+      }),
+    );
   });
 });

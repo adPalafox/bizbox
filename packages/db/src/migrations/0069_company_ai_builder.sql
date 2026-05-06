@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS "builder_sessions" (
 	"adapter_type" text NOT NULL,
 	"model" text NOT NULL,
 	"state" text DEFAULT 'active' NOT NULL,
+	"archived_at" timestamp with time zone,
 	"input_tokens_total" integer DEFAULT 0 NOT NULL,
 	"output_tokens_total" integer DEFAULT 0 NOT NULL,
 	"cost_cents_total" integer DEFAULT 0 NOT NULL,
@@ -90,6 +91,8 @@ ALTER TABLE "builder_provider_settings"
 CREATE INDEX IF NOT EXISTS "builder_sessions_company_idx" ON "builder_sessions" USING btree ("company_id");
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "builder_sessions_company_created_idx" ON "builder_sessions" USING btree ("company_id","created_at");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "builder_sessions_company_archived_created_idx" ON "builder_sessions" USING btree ("company_id","archived_at","created_at");
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "builder_messages_session_sequence_uq" ON "builder_messages" USING btree ("session_id","sequence");
 --> statement-breakpoint

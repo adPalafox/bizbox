@@ -303,6 +303,8 @@ export type {
   BuilderSessionState,
   BuilderMessageRole,
   BuilderProposalStatus,
+  BuilderRuntimeConfigSummary,
+  BuilderHandoffTarget,
   BuilderToolCall,
   BuilderToolResult,
   BuilderMessageContent,

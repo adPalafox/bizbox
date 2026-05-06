@@ -27,6 +27,8 @@ import { forbidden, notFound } from "../errors.js";
  *   GET    /api/companies/:companyId/builder/sessions/:sid
  *   POST   /api/companies/:companyId/builder/sessions/:sid/messages
  *   POST   /api/companies/:companyId/builder/sessions/:sid/abort
+ *   POST   /api/companies/:companyId/builder/sessions/:sid/archive
+ *   POST   /api/companies/:companyId/builder/sessions/:sid/restore
  *
  * Authz: board only in v0. Agents are blocked even with company access; the
  * Builder is an operator copilot, not an agent runtime surface. Phase 2 may
@@ -122,7 +124,8 @@ export function builderRoutes(db: Db) {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     assertBoardActor(req);
-    const sessions = await svc.listSessions(companyId);
+    const includeArchived = req.query.includeArchived === "true";
+    const sessions = await svc.listSessions(companyId, { includeArchived });
     res.json({ sessions });
   });
 
@@ -152,7 +155,7 @@ export function builderRoutes(db: Db) {
         action: "builder.session.created",
         entityType: "builder_session",
         entityId: session.id,
-        details: { title: session.title, model: session.model },
+        details: { title: session.title },
       }).catch((logErr) =>
         logger.warn({ logErr, sessionId: session.id }, "builder sessions: activity log failed"),
       );
@@ -240,6 +243,62 @@ export function builderRoutes(db: Db) {
         details: null,
       }).catch((logErr) =>
         logger.warn({ logErr, sessionId }, "builder abort: activity log failed"),
+      );
+    },
+  );
+
+  router.post(
+    "/companies/:companyId/builder/sessions/:sessionId/archive",
+    async (req, res) => {
+      await assertBuilderEnabled(db);
+      const companyId = req.params.companyId as string;
+      const sessionId = req.params.sessionId as string;
+      assertCompanyAccess(req, companyId);
+      assertBoardActor(req);
+      const archived = await svc.archiveSession(companyId, sessionId);
+      if (!archived) throw notFound("Session not found");
+      res.json({ session: archived });
+      const actor = getActorInfo(req);
+      logActivity(db, {
+        companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "builder.session.archived",
+        entityType: "builder_session",
+        entityId: sessionId,
+        details: { archivedAt: archived.archivedAt },
+      }).catch((logErr) =>
+        logger.warn({ logErr, sessionId }, "builder archive: activity log failed"),
+      );
+    },
+  );
+
+  router.post(
+    "/companies/:companyId/builder/sessions/:sessionId/restore",
+    async (req, res) => {
+      await assertBuilderEnabled(db);
+      const companyId = req.params.companyId as string;
+      const sessionId = req.params.sessionId as string;
+      assertCompanyAccess(req, companyId);
+      assertBoardActor(req);
+      const restored = await svc.restoreSession(companyId, sessionId);
+      if (!restored) throw notFound("Session not found");
+      res.json({ session: restored });
+      const actor = getActorInfo(req);
+      logActivity(db, {
+        companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "builder.session.restored",
+        entityType: "builder_session",
+        entityId: sessionId,
+        details: { archivedAt: null },
+      }).catch((logErr) =>
+        logger.warn({ logErr, sessionId }, "builder restore: activity log failed"),
       );
     },
   );

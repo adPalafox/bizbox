@@ -7,6 +7,15 @@ import type { ProposalApplier } from "../applier-types.js";
 import { builderProposalStore } from "../proposal-store.js";
 import { approvalService } from "../../approvals.js";
 
+function approvalHandoff(approvalId: string) {
+  return {
+    kind: "approval" as const,
+    label: "Review approval",
+    href: `/approvals/${approvalId}`,
+    approvalId,
+  };
+}
+
 /**
  * Helper for declaring a mutation tool whose `run()` simply records a
  * proposal and whose effective change is run later by an applier.
@@ -111,6 +120,7 @@ export function defineMutationTool(def: MutationToolDef): MutationTool {
         return {
           ok: true,
           proposalId: result.proposalId,
+          ...(result.approvalId ? { handoff: approvalHandoff(result.approvalId) } : {}),
           result: {
             status: "pending",
             summary: def.summarize(payload),
@@ -152,6 +162,7 @@ export function defineMutationTool(def: MutationToolDef): MutationTool {
       return {
         ok: true,
         proposalId: proposal.id,
+        ...(approvalId ? { handoff: approvalHandoff(approvalId) } : {}),
         result: {
           status: "pending",
           summary: def.summarize(payload),
