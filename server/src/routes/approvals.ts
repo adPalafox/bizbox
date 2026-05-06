@@ -45,6 +45,38 @@ export function approvalRoutes(db: Db) {
     return approval;
   }
 
+  async function syncBuilderProposalFromApprovalResolution(input: {
+    approvalId: string;
+    companyId: string;
+    status: "approved" | "applied" | "rejected";
+    decidedByUserId: string;
+  }) {
+    try {
+      const builderProposal = await builderProposals.getByApprovalId(
+        input.companyId,
+        input.approvalId,
+      );
+      if (!builderProposal) {
+        return;
+      }
+      await builderProposals.updateStatusFromApproval(
+        builderProposal.id,
+        input.status,
+        input.decidedByUserId,
+      );
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          approvalId: input.approvalId,
+          companyId: input.companyId,
+          status: input.status,
+        },
+        "failed to sync builder proposal after approval resolution",
+      );
+    }
+  }
+
   router.get("/companies/:companyId/approvals", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -138,14 +170,12 @@ export function approvalRoutes(db: Db) {
     }
     const decidedByUserId = req.actor.userId ?? "board";
     const { approval, applied } = await svc.approve(id, decidedByUserId, req.body.decisionNote);
-    const builderProposal = await builderProposals.getByApprovalId(approval.companyId, approval.id);
-    if (builderProposal) {
-      await builderProposals.updateStatusFromApproval(
-        builderProposal.id,
-        applied ? "applied" : "approved",
-        decidedByUserId,
-      );
-    }
+    await syncBuilderProposalFromApprovalResolution({
+      approvalId: approval.id,
+      companyId: approval.companyId,
+      status: applied ? "applied" : "approved",
+      decidedByUserId,
+    });
 
     if (applied) {
       const linkedIssues = await issueApprovalsSvc.listIssuesForApproval(approval.id);
@@ -242,14 +272,12 @@ export function approvalRoutes(db: Db) {
     }
     const decidedByUserId = req.actor.userId ?? "board";
     const { approval, applied } = await svc.reject(id, decidedByUserId, req.body.decisionNote);
-    const builderProposal = await builderProposals.getByApprovalId(approval.companyId, approval.id);
-    if (builderProposal) {
-      await builderProposals.updateStatusFromApproval(
-        builderProposal.id,
-        "rejected",
-        decidedByUserId,
-      );
-    }
+    await syncBuilderProposalFromApprovalResolution({
+      approvalId: approval.id,
+      companyId: approval.companyId,
+      status: "rejected",
+      decidedByUserId,
+    });
 
     if (applied) {
       await logActivity(db, {

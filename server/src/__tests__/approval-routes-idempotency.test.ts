@@ -1,6 +1,7 @@
 import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const mockLoggerWarn = vi.hoisted(() => vi.fn());
 
 const mockApprovalService = vi.hoisted(() => ({
   list: vi.fn(),
@@ -31,6 +32,12 @@ const mockLogActivity = vi.hoisted(() => vi.fn());
 const mockBuilderProposalStore = vi.hoisted(() => ({
   getByApprovalId: vi.fn(),
   updateStatusFromApproval: vi.fn(),
+}));
+
+vi.mock("../middleware/logger.js", () => ({
+  logger: {
+    warn: mockLoggerWarn,
+  },
 }));
 
 function registerModuleMocks() {
@@ -114,6 +121,7 @@ describe("approval routes idempotent retries", () => {
     mockBuilderProposalStore.getByApprovalId.mockReset();
     mockBuilderProposalStore.updateStatusFromApproval.mockReset();
     mockLogActivity.mockReset();
+    mockLoggerWarn.mockReset();
     mockHeartbeatService.wakeup.mockResolvedValue({ id: "wake-1" });
     mockIssueApprovalService.listIssuesForApproval.mockResolvedValue([{ id: "issue-1" }]);
     mockLogActivity.mockResolvedValue(undefined);
@@ -375,6 +383,100 @@ describe("approval routes idempotent retries", () => {
       "proposal-8",
       "rejected",
       "user-1",
+    );
+  });
+
+  it("keeps approve successful when builder proposal sync fails after approval commit", async () => {
+    mockApprovalService.getById.mockResolvedValue({
+      id: "approval-10",
+      companyId: "company-1",
+      type: "hire_agent",
+      status: "pending",
+      payload: {},
+      requestedByAgentId: null,
+    });
+    mockApprovalService.approve.mockResolvedValue({
+      approval: {
+        id: "approval-10",
+        companyId: "company-1",
+        type: "hire_agent",
+        status: "approved",
+        payload: {},
+        requestedByAgentId: null,
+      },
+      applied: true,
+    });
+    mockBuilderProposalStore.getByApprovalId.mockRejectedValue(new Error("transient proposal sync"));
+
+    const res = await request(await createApp())
+      .post("/api/approvals/approval-10/approve")
+      .send({ decisionNote: "ship it" });
+
+    expect(res.status).toBe(200);
+    expect(mockApprovalService.approve).toHaveBeenCalledWith("approval-10", "user-1", "ship it");
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "approval.approved",
+        entityId: "approval-10",
+      }),
+    );
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalId: "approval-10",
+        companyId: "company-1",
+        status: "applied",
+      }),
+      "failed to sync builder proposal after approval resolution",
+    );
+  });
+
+  it("keeps reject successful when builder proposal sync fails after approval commit", async () => {
+    mockApprovalService.getById.mockResolvedValue({
+      id: "approval-11",
+      companyId: "company-1",
+      type: "set_budget",
+      status: "pending",
+      payload: {},
+    });
+    mockApprovalService.reject.mockResolvedValue({
+      approval: {
+        id: "approval-11",
+        companyId: "company-1",
+        type: "set_budget",
+        status: "rejected",
+        payload: {},
+      },
+      applied: true,
+    });
+    mockBuilderProposalStore.getByApprovalId.mockResolvedValue({
+      id: "proposal-11",
+      companyId: "company-1",
+    });
+    mockBuilderProposalStore.updateStatusFromApproval.mockRejectedValue(
+      new Error("transient proposal update"),
+    );
+
+    const res = await request(await createApp())
+      .post("/api/approvals/approval-11/reject")
+      .send({ decisionNote: "not now" });
+
+    expect(res.status).toBe(200);
+    expect(mockApprovalService.reject).toHaveBeenCalledWith("approval-11", "user-1", "not now");
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "approval.rejected",
+        entityId: "approval-11",
+      }),
+    );
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        approvalId: "approval-11",
+        companyId: "company-1",
+        status: "rejected",
+      }),
+      "failed to sync builder proposal after approval resolution",
     );
   });
 
