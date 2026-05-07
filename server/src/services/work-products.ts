@@ -8,6 +8,7 @@ import {
   type DeliverableListItem,
   type IssueWorkProduct,
   parseIssueArtifactWorkProductMetadata,
+  deriveAgentUrlKey,
 } from "@paperclipai/shared";
 
 type IssueWorkProductRow = typeof issueWorkProducts.$inferSelect;
@@ -677,7 +678,7 @@ function rowToDeliverableListItem(row: DeliverableQueryRow): DeliverableListItem
           },
     agent:
       row.agent_id && row.agent_name
-        ? { id: row.agent_id, name: row.agent_name, icon: row.agent_icon }
+        ? { id: row.agent_id, name: row.agent_name, urlKey: deriveAgentUrlKey(row.agent_name, row.agent_id), icon: row.agent_icon }
         : null,
     runId: row.created_by_run_id,
   };

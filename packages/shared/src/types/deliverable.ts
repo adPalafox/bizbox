@@ -18,6 +18,8 @@ export interface DeliverableIssueRef {
 export interface DeliverableAgentRef {
   id: string;
   name: string;
+  /** Canonical route key. Mirrors `agents.urlKey`. */
+  urlKey: string | null;
   /** Optional avatar/icon URL or initials key. Mirrors `agents.icon`. */
   icon: string | null;
 }

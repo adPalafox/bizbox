@@ -72,6 +72,7 @@ function createDeliverableQueryRow(overrides: Partial<Record<string, unknown>> =
     ri_status: "in_progress",
     agent_id: null,
     agent_name: null,
+    agent_url_key: null,
     agent_icon: null,
     ...overrides,
   };

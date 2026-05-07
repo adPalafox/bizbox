@@ -68,7 +68,7 @@ function sampleItem(overrides: Record<string, unknown> = {}) {
     originalFilename: "report.pdf",
     childIssue: { id: "child-1", identifier: "PAP-12", title: "Write report", status: "done" },
     rootIssue: { id: "root-1", identifier: "PAP-1", title: "Quarterly review", status: "in_progress" },
-    agent: { id: "agent-1", name: "Astro", icon: null },
+    agent: { id: "agent-1", name: "Astro", urlKey: "astro", icon: null },
     runId: "run-1",
     ...overrides,
   };

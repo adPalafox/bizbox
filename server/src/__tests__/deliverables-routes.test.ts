@@ -62,7 +62,7 @@ function sampleDeliverable(overrides: Record<string, unknown> = {}) {
     originalFilename: "report.pdf",
     childIssue: { id: childIssueId, identifier: "PAP-12", title: "Write report", status: "done" },
     rootIssue: { id: rootIssueId, identifier: "PAP-1", title: "Quarterly review", status: "in_progress" },
-    agent: { id: agentId, name: "Astro", icon: null },
+    agent: { id: agentId, name: "Astro", urlKey: "astro", icon: null },
     runId,
     ...overrides,
   };
