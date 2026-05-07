@@ -461,4 +461,37 @@ describe("agent issue mutation checkout ownership", () => {
       title: "Claimable update",
     });
   });
+
+  it("forbids agents from moving an awaiting_human issue back to an active status", async () => {
+    mockIssueService.getById.mockResolvedValue(
+      makeIssue({ status: "awaiting_human", assigneeAgentId: null }),
+    );
+
+    const res = await request(await createApp(peerActor()))
+      .patch(`/api/issues/${issueId}`)
+      .send({ status: "in_progress" });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Only board operators can move an issue out of awaiting_human");
+    expect(mockIssueService.update).not.toHaveBeenCalled();
+  });
+
+  it("allows agents to set status to awaiting_human (self-park)", async () => {
+    mockIssueService.getById.mockResolvedValue(
+      makeIssue({ status: "in_progress", assigneeAgentId: peerAgentId }),
+    );
+    mockIssueService.assertCheckoutOwner.mockResolvedValue({ adoptedFromRunId: null });
+    mockIssueService.update.mockImplementation(async (_id: string, patch: Record<string, unknown>) => ({
+      ...makeIssue({ status: "in_progress", assigneeAgentId: peerAgentId }),
+      ...patch,
+    }));
+
+    const res = await request(await createApp(peerActor()))
+      .patch(`/api/issues/${issueId}`)
+      .send({ status: "awaiting_human" });
+
+    expect(res.status).toBe(200);
+    expect(mockIssueService.update).toHaveBeenCalled();
+    expect(res.body.status).toBe("awaiting_human");
+  });
 });

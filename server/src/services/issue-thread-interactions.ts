@@ -724,14 +724,17 @@ export function issueThreadInteractionService(db: Db) {
 
       await touchIssue(db, issue.id);
 
-      // Auto-park: when an agent creates an interaction asking for a human
+      // Auto-park: when an *agent* creates an interaction asking for a human
       // answer (`ask_user_questions`) or human confirmation
       // (`request_confirmation`), and the issue is currently `in_progress`,
       // automatically transition it to `awaiting_human` so AI agents do not
       // try to keep working on it. The interaction-resolution paths above
       // wake the assignee back up and (for confirmations) re-set status to
       // `todo` unless the issue is parked for another reason.
-      if (data.kind === "ask_user_questions" || data.kind === "request_confirmation") {
+      if (
+        actor.agentId
+        && (data.kind === "ask_user_questions" || data.kind === "request_confirmation")
+      ) {
         const currentIssueRow = await db
           .select({ status: issues.status })
           .from(issues)
@@ -740,7 +743,7 @@ export function issueThreadInteractionService(db: Db) {
         if (currentIssueRow && currentIssueRow.status === "in_progress") {
           await issueService(db).update(issue.id, {
             status: "awaiting_human",
-            actorAgentId: actor.agentId ?? null,
+            actorAgentId: actor.agentId,
             actorUserId: actor.userId ?? null,
           });
         }

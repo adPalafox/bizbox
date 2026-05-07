@@ -689,6 +689,203 @@ describeEmbeddedPostgres("issueThreadInteractionService", () => {
     });
   });
 
+  it("auto-parks an in_progress issue to awaiting_human when an agent creates an ask_user_questions interaction", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Auto-park parent",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parent issue",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "ask_user_questions",
+      continuationPolicy: "wake_assignee",
+      payload: {
+        version: 1,
+        questions: [
+          {
+            id: "scope",
+            prompt: "Pick a path",
+            selectionMode: "single",
+            required: true,
+            options: [
+              { id: "a", label: "Path A" },
+              { id: "b", label: "Path B" },
+            ],
+          },
+        ],
+      },
+    }, {
+      agentId,
+    });
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated?.status).toBe("awaiting_human");
+  });
+
+  it("does not auto-park when a board user creates an interaction", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Board-asked question",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parent issue",
+      status: "in_progress",
+      priority: "medium",
+    });
+
+    await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "ask_user_questions",
+      continuationPolicy: "wake_assignee",
+      payload: {
+        version: 1,
+        questions: [
+          {
+            id: "q",
+            prompt: "Pick one",
+            selectionMode: "single",
+            required: true,
+            options: [
+              { id: "a", label: "A" },
+              { id: "b", label: "B" },
+            ],
+          },
+        ],
+      },
+    }, {
+      userId: "local-board",
+    });
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated?.status).toBe("in_progress");
+  });
+
+  it("preserves awaiting_human when accepting a confirmation that returns to the creator agent", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Awaiting human flow",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parked issue",
+      status: "awaiting_human",
+      priority: "medium",
+      assigneeUserId: "local-board",
+    });
+
+    const created = await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "request_confirmation",
+      continuationPolicy: "wake_assignee_on_accept",
+      payload: {
+        version: 1,
+        prompt: "Approve?",
+      },
+    }, {
+      agentId,
+    });
+
+    const accepted = await interactionsSvc.acceptInteraction({
+      id: issueId,
+      companyId,
+      goalId,
+      projectId: null,
+    }, created.id, {}, {
+      userId: "local-board",
+    });
+
+    expect(accepted.continuationIssue?.status).toBe("awaiting_human");
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated?.status).toBe("awaiting_human");
+    expect(updated?.assigneeAgentId).toBe(agentId);
+  });
+
   it("expires supersedable request confirmations when a user comments", async () => {
     const companyId = randomUUID();
     const goalId = randomUUID();
