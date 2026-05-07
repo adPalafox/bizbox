@@ -1,7 +1,8 @@
 import { and, desc, eq, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { issueWorkProducts, issues } from "@paperclipai/db";
+import { documents, documentRevisions, issueDocuments, issueWorkProducts, issues } from "@paperclipai/db";
 import {
+  ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY,
   type DeliverableDetail,
   type DeliverableIssueRef,
   type DeliverableListItem,
@@ -200,26 +201,41 @@ export function workProductService(db: Db) {
       const limit = clampDeliverableLimit(opts.limit);
       const offset = Math.max(0, Math.floor(opts.offset ?? 0));
 
-      const filters: SQL[] = [];
-      if (opts.projectId) filters.push(sql`wp.project_id = ${opts.projectId}`);
-      if (opts.agentId) filters.push(sql`a.id = ${opts.agentId}`);
+      const artifactFilters: SQL[] = [];
+      const documentFilters: SQL[] = [];
+      if (opts.projectId) {
+        artifactFilters.push(sql`wp.project_id = ${opts.projectId}`);
+        documentFilters.push(sql`ci.project_id = ${opts.projectId}`);
+      }
+      if (opts.agentId) {
+        artifactFilters.push(sql`a.id = ${opts.agentId}`);
+        documentFilters.push(sql`da.id = ${opts.agentId}`);
+      }
       if (opts.q && opts.q.trim().length > 0) {
         const escaped = escapeLikePattern(opts.q.trim());
         const like = `%${escaped}%`;
-        filters.push(sql`wp.title ILIKE ${like} ESCAPE '\\'`);
+        artifactFilters.push(sql`wp.title ILIKE ${like} ESCAPE '\\'`);
+        documentFilters.push(sql`COALESCE(d.title, idoc.key) ILIKE ${like} ESCAPE '\\'`);
       }
-      const extraWhere = filters.length > 0 ? sql` AND ${sql.join(filters, sql` AND `)}` : sql``;
+      const artifactWhere = artifactFilters.length > 0 ? sql` AND ${sql.join(artifactFilters, sql` AND `)}` : sql``;
+      const documentWhere = documentFilters.length > 0 ? sql` AND ${sql.join(documentFilters, sql` AND `)}` : sql``;
 
       const rows = await db.execute<DeliverableQueryRow>(sql`
-        WITH RECURSIVE seeds AS (
-          SELECT DISTINCT issue_id AS id
-          FROM issue_work_products
-          WHERE company_id = ${companyId} AND type = 'artifact'
+        WITH RECURSIVE deliverable_seeds AS (
+          SELECT wp.issue_id AS issue_id
+          FROM issue_work_products wp
+          WHERE wp.company_id = ${companyId}
+            AND wp.type = 'artifact'
+          UNION
+          SELECT idoc.issue_id AS issue_id
+          FROM issue_documents idoc
+          WHERE idoc.company_id = ${companyId}
+            AND idoc.key <> ${ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY}
         ),
         issue_chain AS (
-          SELECT s.id AS start_id, i.id AS current_id, i.parent_id, 0 AS depth
-          FROM seeds s
-          JOIN issues i ON i.id = s.id
+          SELECT s.issue_id AS start_id, i.id AS current_id, i.parent_id, 0 AS depth
+          FROM deliverable_seeds s
+          JOIN issues i ON i.id = s.issue_id
           UNION ALL
           SELECT ic.start_id, p.id, p.parent_id, ic.depth + 1
           FROM issue_chain ic
@@ -231,25 +247,104 @@ export function workProductService(db: Db) {
           FROM issue_chain
           WHERE parent_id IS NULL
           ORDER BY start_id, depth DESC
+        ),
+        all_deliverables AS (
+          SELECT
+            wp.id,
+            'artifact'::text AS deliverable_source,
+            wp.company_id,
+            wp.project_id,
+            wp.issue_id,
+            wp.type,
+            wp.provider,
+            wp.external_id,
+            wp.title,
+            wp.url,
+            wp.status,
+            wp.review_state,
+            wp.is_primary,
+            wp.health_status,
+            wp.summary,
+            wp.metadata,
+            wp.created_by_run_id,
+            wp.execution_workspace_id,
+            wp.runtime_service_id,
+            wp.created_at,
+            wp.updated_at,
+            NULL::text AS document_key,
+            NULL::text AS document_format,
+            NULL::text AS document_body,
+            ci.id AS ci_id,
+            ci.identifier AS ci_identifier,
+            ci.title AS ci_title,
+            ci.status AS ci_status,
+            ri.id AS ri_id,
+            ri.identifier AS ri_identifier,
+            ri.title AS ri_title,
+            ri.status AS ri_status,
+            a.id AS agent_id,
+            a.name AS agent_name,
+            a.icon AS agent_icon
+          FROM issue_work_products wp
+          JOIN issues ci ON ci.id = wp.issue_id
+          LEFT JOIN roots r ON r.start_id = wp.issue_id
+          LEFT JOIN issues ri ON ri.id = r.root_id
+          LEFT JOIN heartbeat_runs hr ON hr.id = wp.created_by_run_id
+          LEFT JOIN agents a ON a.id = hr.agent_id
+          WHERE wp.company_id = ${companyId}
+            AND wp.type = 'artifact'${artifactWhere}
+
+          UNION ALL
+
+          SELECT
+            idoc.id,
+            'document'::text AS deliverable_source,
+            idoc.company_id,
+            ci.project_id,
+            idoc.issue_id,
+            'artifact'::text AS type,
+            'paperclip'::text AS provider,
+            NULL::text AS external_id,
+            COALESCE(d.title, idoc.key) AS title,
+            NULL::text AS url,
+            'ready_for_review'::text AS status,
+            'none'::text AS review_state,
+            true AS is_primary,
+            'healthy'::text AS health_status,
+            NULL::text AS summary,
+            NULL::jsonb AS metadata,
+            dr.created_by_run_id,
+            NULL::uuid AS execution_workspace_id,
+            NULL::uuid AS runtime_service_id,
+            d.created_at,
+            d.updated_at,
+            idoc.key AS document_key,
+            d.format AS document_format,
+            d.latest_body AS document_body,
+            ci.id AS ci_id,
+            ci.identifier AS ci_identifier,
+            ci.title AS ci_title,
+            ci.status AS ci_status,
+            ri.id AS ri_id,
+            ri.identifier AS ri_identifier,
+            ri.title AS ri_title,
+            ri.status AS ri_status,
+            da.id AS agent_id,
+            da.name AS agent_name,
+            da.icon AS agent_icon
+          FROM issue_documents idoc
+          JOIN issues ci ON ci.id = idoc.issue_id
+          JOIN documents d ON d.id = idoc.document_id
+          LEFT JOIN roots r ON r.start_id = idoc.issue_id
+          LEFT JOIN issues ri ON ri.id = r.root_id
+          LEFT JOIN document_revisions dr ON dr.id = d.latest_revision_id
+          LEFT JOIN agents da ON da.id = COALESCE(d.updated_by_agent_id, d.created_by_agent_id)
+          WHERE idoc.company_id = ${companyId}
+            AND idoc.key <> ${ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY}${documentWhere}
         )
-        SELECT
-          wp.id, wp.company_id, wp.project_id, wp.issue_id, wp.type, wp.provider,
-          wp.external_id, wp.title, wp.url, wp.status, wp.review_state, wp.is_primary,
-          wp.health_status, wp.summary, wp.metadata, wp.created_by_run_id,
-          wp.execution_workspace_id, wp.runtime_service_id,
-          wp.created_at, wp.updated_at,
-          ci.id AS ci_id, ci.identifier AS ci_identifier, ci.title AS ci_title, ci.status AS ci_status,
-          ri.id AS ri_id, ri.identifier AS ri_identifier, ri.title AS ri_title, ri.status AS ri_status,
-          a.id AS agent_id, a.name AS agent_name, a.icon AS agent_icon
-        FROM issue_work_products wp
-        JOIN issues ci ON ci.id = wp.issue_id
-        LEFT JOIN roots r ON r.start_id = wp.issue_id
-        LEFT JOIN issues ri ON ri.id = r.root_id
-        LEFT JOIN heartbeat_runs hr ON hr.id = wp.created_by_run_id
-        LEFT JOIN agents a ON a.id = hr.agent_id
-        WHERE wp.company_id = ${companyId}
-          AND wp.type = 'artifact'${extraWhere}
-        ORDER BY wp.created_at DESC, wp.id DESC
+        SELECT *
+        FROM all_deliverables
+        ORDER BY created_at DESC, id DESC
         LIMIT ${limit}
         OFFSET ${offset}
       `);
@@ -264,15 +359,20 @@ export function workProductService(db: Db) {
 
     getDeliverableById: async (id: string): Promise<DeliverableDetail | null> => {
       const rows = await db.execute<DeliverableQueryRow>(sql`
-        WITH RECURSIVE seeds AS (
-          SELECT issue_id AS id
-          FROM issue_work_products
-          WHERE id = ${id} AND type = 'artifact'
+        WITH RECURSIVE deliverable_seed AS (
+          SELECT wp.issue_id AS issue_id
+          FROM issue_work_products wp
+          WHERE wp.id = ${id} AND wp.type = 'artifact'
+          UNION
+          SELECT idoc.issue_id AS issue_id
+          FROM issue_documents idoc
+          WHERE idoc.id = ${id}
+            AND idoc.key <> ${ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY}
         ),
         issue_chain AS (
-          SELECT s.id AS start_id, i.id AS current_id, i.parent_id, 0 AS depth
-          FROM seeds s
-          JOIN issues i ON i.id = s.id
+          SELECT s.issue_id AS start_id, i.id AS current_id, i.parent_id, 0 AS depth
+          FROM deliverable_seed s
+          JOIN issues i ON i.id = s.issue_id
           UNION ALL
           SELECT ic.start_id, p.id, p.parent_id, ic.depth + 1
           FROM issue_chain ic
@@ -284,23 +384,103 @@ export function workProductService(db: Db) {
           FROM issue_chain
           WHERE parent_id IS NULL
           ORDER BY start_id, depth DESC
+        ),
+        deliverable AS (
+          SELECT
+            wp.id,
+            'artifact'::text AS deliverable_source,
+            wp.company_id,
+            wp.project_id,
+            wp.issue_id,
+            wp.type,
+            wp.provider,
+            wp.external_id,
+            wp.title,
+            wp.url,
+            wp.status,
+            wp.review_state,
+            wp.is_primary,
+            wp.health_status,
+            wp.summary,
+            wp.metadata,
+            wp.created_by_run_id,
+            wp.execution_workspace_id,
+            wp.runtime_service_id,
+            wp.created_at,
+            wp.updated_at,
+            NULL::text AS document_key,
+            NULL::text AS document_format,
+            NULL::text AS document_body,
+            ci.id AS ci_id,
+            ci.identifier AS ci_identifier,
+            ci.title AS ci_title,
+            ci.status AS ci_status,
+            ri.id AS ri_id,
+            ri.identifier AS ri_identifier,
+            ri.title AS ri_title,
+            ri.status AS ri_status,
+            a.id AS agent_id,
+            a.name AS agent_name,
+            a.icon AS agent_icon
+          FROM issue_work_products wp
+          JOIN issues ci ON ci.id = wp.issue_id
+          LEFT JOIN roots r ON r.start_id = wp.issue_id
+          LEFT JOIN issues ri ON ri.id = r.root_id
+          LEFT JOIN heartbeat_runs hr ON hr.id = wp.created_by_run_id
+          LEFT JOIN agents a ON a.id = hr.agent_id
+          WHERE wp.id = ${id}
+            AND wp.type = 'artifact'
+
+          UNION ALL
+
+          SELECT
+            idoc.id,
+            'document'::text AS deliverable_source,
+            idoc.company_id,
+            ci.project_id,
+            idoc.issue_id,
+            'artifact'::text AS type,
+            'paperclip'::text AS provider,
+            NULL::text AS external_id,
+            COALESCE(d.title, idoc.key) AS title,
+            NULL::text AS url,
+            'ready_for_review'::text AS status,
+            'none'::text AS review_state,
+            true AS is_primary,
+            'healthy'::text AS health_status,
+            NULL::text AS summary,
+            NULL::jsonb AS metadata,
+            dr.created_by_run_id,
+            NULL::uuid AS execution_workspace_id,
+            NULL::uuid AS runtime_service_id,
+            d.created_at,
+            d.updated_at,
+            idoc.key AS document_key,
+            d.format AS document_format,
+            d.latest_body AS document_body,
+            ci.id AS ci_id,
+            ci.identifier AS ci_identifier,
+            ci.title AS ci_title,
+            ci.status AS ci_status,
+            ri.id AS ri_id,
+            ri.identifier AS ri_identifier,
+            ri.title AS ri_title,
+            ri.status AS ri_status,
+            da.id AS agent_id,
+            da.name AS agent_name,
+            da.icon AS agent_icon
+          FROM issue_documents idoc
+          JOIN issues ci ON ci.id = idoc.issue_id
+          JOIN documents d ON d.id = idoc.document_id
+          LEFT JOIN roots r ON r.start_id = idoc.issue_id
+          LEFT JOIN issues ri ON ri.id = r.root_id
+          LEFT JOIN document_revisions dr ON dr.id = d.latest_revision_id
+          LEFT JOIN agents da ON da.id = COALESCE(d.updated_by_agent_id, d.created_by_agent_id)
+          WHERE idoc.id = ${id}
+            AND idoc.key <> ${ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY}
         )
-        SELECT
-          wp.id, wp.company_id, wp.project_id, wp.issue_id, wp.type, wp.provider,
-          wp.external_id, wp.title, wp.url, wp.status, wp.review_state, wp.is_primary,
-          wp.health_status, wp.summary, wp.metadata, wp.created_by_run_id,
-          wp.execution_workspace_id, wp.runtime_service_id,
-          wp.created_at, wp.updated_at,
-          ci.id AS ci_id, ci.identifier AS ci_identifier, ci.title AS ci_title, ci.status AS ci_status,
-          ri.id AS ri_id, ri.identifier AS ri_identifier, ri.title AS ri_title, ri.status AS ri_status,
-          a.id AS agent_id, a.name AS agent_name, a.icon AS agent_icon
-        FROM issue_work_products wp
-        JOIN issues ci ON ci.id = wp.issue_id
-        LEFT JOIN roots r ON r.start_id = wp.issue_id
-        LEFT JOIN issues ri ON ri.id = r.root_id
-        LEFT JOIN heartbeat_runs hr ON hr.id = wp.created_by_run_id
-        LEFT JOIN agents a ON a.id = hr.agent_id
-        WHERE wp.id = ${id}
+        SELECT *
+        FROM deliverable
         LIMIT 1
       `);
       const row = toRowArray<DeliverableQueryRow>(rows)[0];
@@ -308,9 +488,52 @@ export function workProductService(db: Db) {
       const base = rowToDeliverableListItem(row);
       if (!base) return null;
 
-      // Walk the parent chain to produce the ordered ancestor list (nearest -> root).
       const ancestors = await loadAncestorChain(db, base.childIssue.id);
       return { ...base, ancestors };
+    },
+
+    getDeliverableDocumentContentById: async (id: string): Promise<DeliverableDocumentContent | null> => {
+      const rows = await db.execute<{
+        id: string;
+        company_id: string;
+        key: string;
+        format: string;
+        body: string;
+        title: string | null;
+      }>(sql`
+        SELECT
+          idoc.id,
+          idoc.company_id,
+          idoc.key,
+          d.format,
+          d.latest_body AS body,
+          d.title
+        FROM issue_documents idoc
+        JOIN documents d ON d.id = idoc.document_id
+        WHERE idoc.id = ${id}
+          AND idoc.key <> ${ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY}
+        LIMIT 1
+      `);
+      const row = toRowArray<{
+        id: string;
+        company_id: string;
+        key: string;
+        format: string;
+        body: string;
+        title: string | null;
+      }>(rows)[0];
+      if (!row) return null;
+      const body = row.body ?? "";
+      const normalizedKey = row.key.trim().length > 0 ? row.key.trim() : "document";
+      const filename = `${normalizedKey}.md`;
+      return {
+        id: row.id,
+        companyId: row.company_id,
+        filename,
+        title: row.title,
+        contentType: row.format === "markdown" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8",
+        body,
+      };
     },
   };
 }
@@ -334,6 +557,7 @@ export function clampDeliverableLimit(value: unknown): number {
 
 interface DeliverableQueryRow extends Record<string, unknown> {
   id: string;
+  deliverable_source: "artifact" | "document";
   company_id: string;
   project_id: string | null;
   issue_id: string;
@@ -353,6 +577,9 @@ interface DeliverableQueryRow extends Record<string, unknown> {
   runtime_service_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
+  document_key: string | null;
+  document_format: string | null;
+  document_body: string | null;
   ci_id: string;
   ci_identifier: string | null;
   ci_title: string;
@@ -364,6 +591,15 @@ interface DeliverableQueryRow extends Record<string, unknown> {
   agent_id: string | null;
   agent_name: string | null;
   agent_icon: string | null;
+}
+
+interface DeliverableDocumentContent {
+  id: string;
+  companyId: string;
+  filename: string;
+  title: string | null;
+  contentType: string;
+  body: string;
 }
 
 function toRowArray<T>(result: unknown): T[] {
@@ -384,14 +620,32 @@ function toIsoString(value: Date | string): string {
 }
 
 function rowToDeliverableListItem(row: DeliverableQueryRow): DeliverableListItem | null {
-  const metadata = parseIssueArtifactWorkProductMetadata({
-    type: row.type as IssueWorkProduct["type"],
-    metadata: row.metadata,
-  });
-  if (!metadata) return null;
+  let contentPath: string;
+  let contentType: string;
+  let byteSize: number;
+  let originalFilename: string | null;
 
-  // Treat the child issue as the root only when there is no resolvable parent
-  // chain. The recursive CTE returns the same id for issues with no parent.
+  if (row.deliverable_source === "artifact") {
+    const metadata = parseIssueArtifactWorkProductMetadata({
+      type: row.type as IssueWorkProduct["type"],
+      metadata: row.metadata,
+    });
+    if (!metadata) return null;
+    contentPath = metadata.contentPath;
+    contentType = metadata.contentType;
+    byteSize = metadata.byteSize;
+    originalFilename = metadata.originalFilename;
+  } else {
+    const body = row.document_body ?? "";
+    contentPath = `/api/deliverables/${row.id}/content`;
+    contentType = row.document_format === "markdown"
+      ? "text/markdown; charset=utf-8"
+      : "text/plain; charset=utf-8";
+    byteSize = Buffer.byteLength(body, "utf8");
+    const key = (row.document_key ?? "document").trim() || "document";
+    originalFilename = `${key}.md`;
+  }
+
   const rootIsSelf = row.ri_id === null || row.ri_id === row.ci_id;
 
   return {
@@ -402,10 +656,10 @@ function rowToDeliverableListItem(row: DeliverableQueryRow): DeliverableListItem
     summary: row.summary,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
-    contentPath: metadata.contentPath,
-    contentType: metadata.contentType,
-    byteSize: metadata.byteSize,
-    originalFilename: metadata.originalFilename,
+    contentPath,
+    contentType,
+    byteSize,
+    originalFilename,
     childIssue: {
       id: row.ci_id,
       identifier: row.ci_identifier,

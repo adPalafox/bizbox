@@ -27,7 +27,7 @@ export function Deliverables() {
       q: searchTerm || undefined,
     }),
     queryFn: () =>
-      deliverablesApi.list(selectedCompanyId!, {
+      deliverablesApi.listAll(selectedCompanyId!, {
         q: searchTerm || undefined,
       }),
     enabled: !!selectedCompanyId,

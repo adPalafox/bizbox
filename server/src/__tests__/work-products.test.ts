@@ -32,6 +32,7 @@ function createDeliverableQueryRow(overrides: Partial<Record<string, unknown>> =
   const now = new Date("2026-05-01T00:00:00.000Z");
   return {
     id: "deliverable-1",
+    deliverable_source: "artifact",
     company_id: "company-1",
     project_id: "project-1",
     issue_id: "issue-child",
@@ -58,6 +59,9 @@ function createDeliverableQueryRow(overrides: Partial<Record<string, unknown>> =
     runtime_service_id: null,
     created_at: now,
     updated_at: now,
+    document_key: null,
+    document_format: null,
+    document_body: null,
     ci_id: "issue-child",
     ci_identifier: "PAP-12",
     ci_title: "Write report",
@@ -186,5 +190,31 @@ describe("workProductService", () => {
     ]);
     expect(execute).toHaveBeenCalledTimes(2);
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it("maps issue documents into company deliverables", async () => {
+    const now = new Date("2026-05-02T00:00:00.000Z");
+    const execute = vi.fn().mockResolvedValue([
+      createDeliverableQueryRow({
+        id: "doc-deliverable-1",
+        deliverable_source: "document",
+        title: "Company Requirements",
+        metadata: null,
+        document_key: "company-requirements",
+        document_format: "markdown",
+        document_body: "# Requirements\n",
+        created_at: now,
+        updated_at: now,
+      }),
+    ]);
+
+    const svc = workProductService({ execute } as any);
+    const items = await svc.listDeliverablesForCompany("company-1", { limit: 50, offset: 0 });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.id).toBe("doc-deliverable-1");
+    expect(items[0]?.contentPath).toBe("/api/deliverables/doc-deliverable-1/content");
+    expect(items[0]?.contentType).toContain("text/markdown");
+    expect(items[0]?.originalFilename).toBe("company-requirements.md");
   });
 });

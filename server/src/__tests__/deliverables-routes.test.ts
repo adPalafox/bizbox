@@ -15,6 +15,7 @@ const runId = "77777777-7777-4777-8777-777777777777";
 const mockWorkProductService = vi.hoisted(() => ({
   listDeliverablesForCompany: vi.fn(),
   getDeliverableById: vi.fn(),
+  getDeliverableDocumentContentById: vi.fn(),
 }));
 
 vi.mock("../services/index.js", () => ({
@@ -154,6 +155,40 @@ describe("deliverables routes", () => {
 
       const res = await request(createApp()).get(`/api/deliverables/${deliverableId}`);
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("GET /api/deliverables/:id/content", () => {
+    it("returns document content when deliverable points to issue document", async () => {
+      mockWorkProductService.getDeliverableDocumentContentById.mockResolvedValue({
+        id: deliverableId,
+        companyId,
+        filename: "company-requirements.md",
+        title: "Company Requirements",
+        contentType: "text/markdown; charset=utf-8",
+        body: "# Company Requirements",
+      });
+
+      const res = await request(createApp()).get(`/api/deliverables/${deliverableId}/content`);
+
+      expect(res.status).toBe(200);
+      expect(res.text).toContain("Company Requirements");
+      expect(res.headers["content-type"]).toContain("text/markdown");
+      expect(res.headers["content-disposition"]).toContain("company-requirements.md");
+      expect(mockWorkProductService.getDeliverableById).not.toHaveBeenCalled();
+    });
+
+    it("redirects to artifact content path when deliverable is artifact", async () => {
+      mockWorkProductService.getDeliverableDocumentContentById.mockResolvedValue(null);
+      mockWorkProductService.getDeliverableById.mockResolvedValue({
+        ...sampleDeliverable(),
+        ancestors: [],
+      });
+
+      const res = await request(createApp()).get(`/api/deliverables/${deliverableId}/content`);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe("/api/attachments/abc/content");
     });
   });
 });

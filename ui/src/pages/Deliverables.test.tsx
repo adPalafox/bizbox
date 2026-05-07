@@ -12,7 +12,7 @@ const setBreadcrumbsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/deliverables", () => ({
   deliverablesApi: {
-    list: (companyId: string, filters?: unknown) => listMock(companyId, filters),
+    listAll: (companyId: string, filters?: unknown) => listMock(companyId, filters),
   },
 }));
 

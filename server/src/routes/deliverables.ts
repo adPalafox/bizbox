@@ -47,5 +47,27 @@ export function deliverableRoutes(db: Db) {
     res.json(deliverable);
   });
 
+  router.get("/deliverables/:id/content", async (req, res) => {
+    const id = req.params.id as string;
+    assertBoard(req);
+
+    const document = await workProductsSvc.getDeliverableDocumentContentById(id);
+    if (document) {
+      assertCompanyAccess(req, document.companyId);
+      res.setHeader("Content-Type", document.contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="${document.filename}"`);
+      res.status(200).send(document.body);
+      return;
+    }
+
+    const deliverable = await workProductsSvc.getDeliverableById(id);
+    if (!deliverable) {
+      res.status(404).json({ error: "Deliverable not found" });
+      return;
+    }
+    assertCompanyAccess(req, deliverable.companyId);
+    res.redirect(302, deliverable.contentPath);
+  });
+
   return router;
 }
