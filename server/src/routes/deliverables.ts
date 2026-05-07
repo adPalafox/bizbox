@@ -3,6 +3,11 @@ import type { Db } from "@paperclipai/db";
 import { workProductService, clampDeliverableLimit } from "../services/index.js";
 import { assertBoard, assertCompanyAccess } from "./authz.js";
 
+function sanitizeDispositionFilename(filename: string): string {
+  const sanitized = filename.replace(/[\u0000-\u001F\u007F"]/g, "").trim();
+  return sanitized.length > 0 ? sanitized : "document.md";
+}
+
 export function deliverableRoutes(db: Db) {
   const router = Router();
   const workProductsSvc = workProductService(db);
@@ -55,7 +60,8 @@ export function deliverableRoutes(db: Db) {
     if (document) {
       assertCompanyAccess(req, document.companyId);
       res.setHeader("Content-Type", document.contentType);
-      res.setHeader("Content-Disposition", `attachment; filename="${document.filename}"`);
+      const filename = sanitizeDispositionFilename(document.filename);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.status(200).send(document.body);
       return;
     }

@@ -178,6 +178,23 @@ describe("deliverables routes", () => {
       expect(mockWorkProductService.getDeliverableById).not.toHaveBeenCalled();
     });
 
+    it("sanitizes document filename before setting content-disposition", async () => {
+      mockWorkProductService.getDeliverableDocumentContentById.mockResolvedValue({
+        id: deliverableId,
+        companyId,
+        filename: 'company"\r\nInjected: true.md',
+        title: "Company Requirements",
+        contentType: "text/markdown; charset=utf-8",
+        body: "# Company Requirements",
+      });
+
+      const res = await request(createApp()).get(`/api/deliverables/${deliverableId}/content`);
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-disposition"]).toBe('attachment; filename="companyInjected: true.md"');
+      expect(res.headers["content-disposition"]).not.toMatch(/[\r\n]/);
+    });
+
     it("redirects to artifact content path when deliverable is artifact", async () => {
       mockWorkProductService.getDeliverableDocumentContentById.mockResolvedValue(null);
       mockWorkProductService.getDeliverableById.mockResolvedValue({

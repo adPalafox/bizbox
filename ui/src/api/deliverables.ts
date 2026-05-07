@@ -16,7 +16,6 @@ export interface DeliverableListFilters {
 }
 
 const DELIVERABLE_PAGE_LIMIT = 200;
-const MAX_DELIVERABLE_PAGES = 100;
 
 function buildDeliverablesQuery(filters?: DeliverableListFilters) {
   const params = new URLSearchParams();
@@ -29,28 +28,13 @@ function buildDeliverablesQuery(filters?: DeliverableListFilters) {
 }
 
 async function listAllDeliverables(companyId: string, filters?: DeliverableListFilters) {
-  const startOffset = Math.max(0, Math.floor(filters?.offset ?? 0));
-  const pageLimit = Math.max(1, Math.min(DELIVERABLE_PAGE_LIMIT, Math.floor(filters?.limit ?? DELIVERABLE_PAGE_LIMIT)));
-
-  const items: DeliverableListItem[] = [];
-  let offset = startOffset;
-
-  for (let page = 0; page < MAX_DELIVERABLE_PAGES; page += 1) {
-    const response = await deliverablesApi.list(companyId, {
-      ...filters,
-      limit: pageLimit,
-      offset,
-    });
-    items.push(...response.items);
-    if (response.items.length < pageLimit) break;
-    offset += pageLimit;
-  }
-
-  return {
-    items,
-    limit: pageLimit,
-    offset: startOffset,
-  } satisfies DeliverableListResponse;
+  const offset = Math.max(0, Math.floor(filters?.offset ?? 0));
+  const limit = Math.max(1, Math.min(DELIVERABLE_PAGE_LIMIT, Math.floor(filters?.limit ?? DELIVERABLE_PAGE_LIMIT)));
+  return deliverablesApi.list(companyId, {
+    ...filters,
+    limit,
+    offset,
+  });
 }
 
 export const deliverablesApi = {

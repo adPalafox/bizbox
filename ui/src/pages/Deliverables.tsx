@@ -27,8 +27,9 @@ export function Deliverables() {
       q: searchTerm || undefined,
     }),
     queryFn: () =>
-      deliverablesApi.listAll(selectedCompanyId!, {
+      deliverablesApi.list(selectedCompanyId!, {
         q: searchTerm || undefined,
+        limit: 200,
       }),
     enabled: !!selectedCompanyId,
   });

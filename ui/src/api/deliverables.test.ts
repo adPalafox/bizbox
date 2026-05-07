@@ -31,26 +31,15 @@ describe("deliverablesApi", () => {
     );
   });
 
-  it("listAll loads every page", async () => {
-    mockApi.get
-      .mockResolvedValueOnce({ items: [{ id: "d1" }], limit: 1, offset: 0 })
-      .mockResolvedValueOnce({ items: [{ id: "d2" }], limit: 1, offset: 1 })
-      .mockResolvedValueOnce({ items: [], limit: 1, offset: 2 });
+  it("listAll delegates to single bounded list request", async () => {
+    mockApi.get.mockResolvedValue({ items: [{ id: "d1" }], limit: 200, offset: 0 });
 
-    const res = await deliverablesApi.listAll("company-1", { limit: 1 });
+    const res = await deliverablesApi.listAll("company-1");
 
-    expect(mockApi.get).toHaveBeenNthCalledWith(
-      1,
-      "/companies/company-1/deliverables?limit=1",
+    expect(mockApi.get).toHaveBeenCalledTimes(1);
+    expect(mockApi.get).toHaveBeenCalledWith(
+      "/companies/company-1/deliverables?limit=200",
     );
-    expect(mockApi.get).toHaveBeenNthCalledWith(
-      2,
-      "/companies/company-1/deliverables?limit=1&offset=1",
-    );
-    expect(mockApi.get).toHaveBeenNthCalledWith(
-      3,
-      "/companies/company-1/deliverables?limit=1&offset=2",
-    );
-    expect(res.items).toEqual([{ id: "d1" }, { id: "d2" }]);
+    expect(res.items).toEqual([{ id: "d1" }]);
   });
 });
