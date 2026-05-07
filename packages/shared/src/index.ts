@@ -495,6 +495,10 @@ export type {
   PluginWebhookDeliveryRecord,
   QuotaWindow,
   ProviderQuotaResult,
+  DeliverableAgentRef,
+  DeliverableDetail,
+  DeliverableIssueRef,
+  DeliverableListItem,
 } from "./types/index.js";
 export {
   isIssueArtifactWorkProductMetadata,

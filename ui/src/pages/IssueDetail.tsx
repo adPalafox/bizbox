@@ -145,6 +145,8 @@ type IssueDeliverable = {
   metadata: NonNullable<ReturnType<typeof parseIssueArtifactWorkProductMetadata>>;
 };
 
+type IssueDocumentDeliverable = NonNullable<Issue["documentSummaries"]>[number];
+
 function formatFileSize(byteSize: number) {
   if (byteSize < 1024) return `${byteSize} B`;
   if (byteSize < 1024 * 1024) return `${(byteSize / 1024).toFixed(1)} KB`;
@@ -2255,6 +2257,12 @@ export function IssueDetail() {
         }),
     [issue?.workProducts],
   );
+  const documentDeliverables = useMemo(
+    () =>
+      ([...(issue?.documentSummaries ?? [])] as IssueDocumentDeliverable[])
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    [issue?.documentSummaries],
+  );
   const deliverableAttachmentIds = useMemo(
     () => new Set(deliverables.map((entry) => entry.metadata.attachmentId)),
     [deliverables],
@@ -2447,7 +2455,7 @@ export function IssueDetail() {
     }
   };
 
-  const hasDeliverables = deliverables.length > 0;
+  const hasDeliverables = deliverables.length > 0 || documentDeliverables.length > 0;
   const hasAttachments = visibleAttachments.length > 0;
   const attachmentUploadButton = (
     <>
@@ -2776,7 +2784,7 @@ export function IssueDetail() {
             <div>
               <h3 className="text-sm font-medium text-muted-foreground">Deliverables</h3>
               <p className="text-xs text-muted-foreground">
-                Download the latest issue-backed files collected from the OpenClaw workspace.
+                Download issue-backed files and jump to issue documents.
               </p>
             </div>
           </div>
@@ -2813,6 +2821,34 @@ export function IssueDetail() {
                   >
                     <Download className="h-3.5 w-3.5" />
                     Download
+                  </a>
+                </div>
+              </div>
+            ))}
+            {documentDeliverables.map((document) => (
+              <div key={document.id} className="rounded-md border border-border bg-background px-3 py-2">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {document.title?.trim() || document.key}
+                      </span>
+                      <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                        Document
+                      </span>
+                    </div>
+                    <p className="break-all font-mono text-[11px] text-muted-foreground">
+                      {document.key}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {document.format} · rev {document.latestRevisionNumber} · Updated {relativeTime(document.updatedAt)}
+                    </p>
+                  </div>
+                  <a
+                    href={`#document-${encodeURIComponent(document.key)}`}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Open
                   </a>
                 </div>
               </div>
