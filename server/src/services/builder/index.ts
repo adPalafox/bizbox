@@ -152,9 +152,6 @@ export function builderService(db: Db) {
         );
       }
       const model = extractModel(config.adapterConfig);
-      if (!model) {
-        throw unprocessable("Builder adapter config must specify a model.");
-      }
 
       return sessions.createSession({
         companyId: input.companyId,
@@ -218,10 +215,6 @@ export function builderService(db: Db) {
       const config = await settings.get(input.companyId);
       if (!config) {
         throw unprocessable("Builder is not configured for this company");
-      }
-      const model = extractModel(config.adapterConfig);
-      if (!model) {
-        throw unprocessable("Builder adapter config must specify a model.");
       }
 
       // Persist the user message before invoking the model so the transcript

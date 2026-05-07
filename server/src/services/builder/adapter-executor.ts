@@ -1,6 +1,7 @@
 import type { Db } from "@paperclipai/db";
 import { getServerAdapter } from "../../adapters/registry.js";
 import { calculateModelCostCents } from "@paperclipai/shared";
+import { randomUUID } from "node:crypto";
 import type {
   AdapterAgent,
   AdapterRuntime,
@@ -79,6 +80,8 @@ export const BUILDER_SUPPORTED_ADAPTER_TYPES = [
   "cursor",
   "gemini_local",
   "pi_local",
+  "openclaw_gateway",
+  "otto_agent",
 ] as const;
 
 /**
@@ -124,8 +127,12 @@ export async function executeBuilderTurn(
   };
 
   const builderPrompt = buildBuilderPrompt(messages as FormatterMessage[], tools);
+  const builderInvocationId = randomUUID();
 
   const context: Record<string, unknown> = {
+    prompt: builderPrompt,
+    executionMode: "builder",
+    builderInvocationId,
     builderPrompt,
     builderTools: tools, // Keep original for debugging
     builderMessages: messages, // Keep original for debugging

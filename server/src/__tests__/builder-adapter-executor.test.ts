@@ -81,4 +81,44 @@ describe("builder adapter executor", () => {
       }),
     );
   });
+
+  it("passes Builder prompt metadata into adapter execution context", async () => {
+    mockExecute.mockResolvedValueOnce({
+      exitCode: 0,
+      errorMessage: null,
+      summary: '{"text":"done","toolCalls":[],"finishReason":"stop"}',
+      resultJson: null,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cachedInputTokens: 0,
+      },
+      costUsd: 0.001,
+      timedOut: false,
+    });
+
+    const { executeBuilderTurn } = await import("../services/builder/adapter-executor.js");
+    await executeBuilderTurn({
+      db: {} as Db,
+      sessionId: "session-1",
+      companyId: "company-1",
+      messages: [{ role: "user", content: "hello" }],
+      tools: [],
+      adapterConfig: {
+        adapterType: "otto_agent",
+        adapterConfig: {},
+      },
+    });
+
+    expect(mockExecute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          prompt: expect.any(String),
+          builderPrompt: expect.any(String),
+          executionMode: "builder",
+          builderInvocationId: expect.any(String),
+        }),
+      }),
+    );
+  });
 });

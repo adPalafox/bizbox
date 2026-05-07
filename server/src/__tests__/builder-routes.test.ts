@@ -23,6 +23,11 @@ const mockBuilderService = vi.hoisted(() => ({
 }));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
+const mockSecretService = vi.hoisted(() => ({
+  create: vi.fn(),
+  rotate: vi.fn(),
+  normalizeSecretRefBindingForPersistence: vi.fn(),
+}));
 
 const mockInstanceSettingsService = vi.hoisted(() => ({
   getExperimental: vi.fn(),
@@ -35,6 +40,9 @@ function registerModuleMocks() {
   }));
   vi.doMock("../services/activity-log.js", () => ({
     logActivity: mockLogActivity,
+  }));
+  vi.doMock("../services/secrets.js", () => ({
+    secretService: () => mockSecretService,
   }));
   vi.doMock("../services/instance-settings.js", () => ({
     instanceSettingsService: () => mockInstanceSettingsService,
@@ -62,6 +70,7 @@ describe("builder routes", () => {
     vi.resetModules();
     vi.doUnmock("../services/builder/index.js");
     vi.doUnmock("../services/activity-log.js");
+    vi.doUnmock("../services/secrets.js");
     vi.doUnmock("../services/instance-settings.js");
     vi.doUnmock("../routes/authz.js");
     vi.doUnmock("../middleware/index.js");
@@ -76,6 +85,11 @@ describe("builder routes", () => {
     mockBuilderService.listProposals.mockResolvedValue([]);
     mockBuilderService.getSettings.mockResolvedValue(null);
     mockBuilderService.getToolCatalog.mockReturnValue({ tools: [] });
+    mockSecretService.create.mockResolvedValue({ id: "secret-1" });
+    mockSecretService.rotate.mockResolvedValue(undefined);
+    mockSecretService.normalizeSecretRefBindingForPersistence.mockImplementation(
+      async (_companyId, value) => value,
+    );
     mockBuilderService.createSession.mockResolvedValue({
       id: sessionId,
       companyId,
@@ -309,6 +323,148 @@ describe("builder routes", () => {
       .send({ adapterType: "", adapterConfig: {} });
     expect(res.status).toBe(400);
     expect(mockBuilderService.upsertSettings).not.toHaveBeenCalled();
+  });
+
+  it("persists OpenClaw Builder tokens as authTokenRef instead of plaintext", async () => {
+    mockBuilderService.getSettings.mockResolvedValue(null);
+    mockBuilderService.upsertSettings.mockResolvedValue({
+      companyId,
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "wss://gateway.example",
+        authTokenRef: { type: "secret_ref", secretId: "secret-1", version: "latest" },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+    const res = await request(app)
+      .put(`/api/companies/${companyId}/builder/settings`)
+      .send({
+        adapterType: "openclaw_gateway",
+        adapterConfig: {
+          url: "wss://gateway.example",
+          authToken: "gateway-token",
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockSecretService.create).toHaveBeenCalled();
+    expect(mockBuilderService.upsertSettings).toHaveBeenCalledWith(companyId, {
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "wss://gateway.example",
+        authTokenRef: { type: "secret_ref", secretId: "secret-1", version: "latest" },
+      },
+    });
+  });
+
+  it("preserves stored Otto apiKeyRef when the user leaves the field blank", async () => {
+    mockBuilderService.getSettings.mockResolvedValue({
+      companyId,
+      adapterType: "otto_agent",
+      adapterConfig: {
+        url: "https://otto.example/api/paperclip",
+        apiKeyRef: { type: "secret_ref", secretId: "secret-otto", version: "latest" },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    mockBuilderService.upsertSettings.mockResolvedValue({
+      companyId,
+      adapterType: "otto_agent",
+      adapterConfig: {
+        url: "https://otto.example/api/paperclip",
+        apiKeyRef: { type: "secret_ref", secretId: "secret-otto", version: "latest" },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+    const res = await request(app)
+      .put(`/api/companies/${companyId}/builder/settings`)
+      .send({
+        adapterType: "otto_agent",
+        adapterConfig: {
+          url: "https://otto.example/api/paperclip",
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockSecretService.create).not.toHaveBeenCalled();
+    expect(mockSecretService.rotate).not.toHaveBeenCalled();
+    expect(mockBuilderService.upsertSettings).toHaveBeenCalledWith(companyId, {
+      adapterType: "otto_agent",
+      adapterConfig: {
+        url: "https://otto.example/api/paperclip",
+        apiKeyRef: { type: "secret_ref", secretId: "secret-otto", version: "latest" },
+      },
+    });
+  });
+
+  it("rotates the stored Otto secret when a replacement apiKey is provided", async () => {
+    mockBuilderService.getSettings.mockResolvedValue({
+      companyId,
+      adapterType: "otto_agent",
+      adapterConfig: {
+        url: "https://otto.example/api/paperclip",
+        apiKeyRef: { type: "secret_ref", secretId: "secret-otto", version: "latest" },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    mockBuilderService.upsertSettings.mockResolvedValue({
+      companyId,
+      adapterType: "otto_agent",
+      adapterConfig: {
+        url: "https://otto.example/api/paperclip",
+        apiKeyRef: { type: "secret_ref", secretId: "secret-otto", version: "latest" },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+    const res = await request(app)
+      .put(`/api/companies/${companyId}/builder/settings`)
+      .send({
+        adapterType: "otto_agent",
+        adapterConfig: {
+          url: "https://otto.example/api/paperclip",
+          apiKey: "replacement-key",
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockSecretService.rotate).toHaveBeenCalledWith(
+      "secret-otto",
+      { value: "replacement-key" },
+      { userId: "board-user" },
+    );
+    expect(mockBuilderService.upsertSettings).toHaveBeenCalledWith(companyId, {
+      adapterType: "otto_agent",
+      adapterConfig: {
+        url: "https://otto.example/api/paperclip",
+        apiKeyRef: { type: "secret_ref", secretId: "secret-otto", version: "latest" },
+      },
+    });
   });
 
   it("lists proposals with additive handoff metadata", async () => {

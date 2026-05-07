@@ -9,6 +9,7 @@ import type { BuilderProviderSettings } from "@paperclipai/shared";
 import { useToastActions } from "@/context/ToastContext";
 
 const QUERY_KEY = ["builder"] as const;
+const BUILDER_MODEL_OPTIONAL_ADAPTERS = new Set(["openclaw_gateway", "otto_agent"]);
 
 function getAvailableBuilderAdapters(supportedAdapterTypes: string[]) {
   const supported = new Set(supportedAdapterTypes);
@@ -28,6 +29,48 @@ function getAdapterStatusText(adapterType: string): string {
     default:
       return "Compatibility unknown";
   }
+}
+
+function parseBooleanLike(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") return true;
+    if (normalized === "false" || normalized === "0") return false;
+  }
+  return null;
+}
+
+function resolveOpenClawSetupMode(config: Record<string, unknown>): CreateConfigValues["openClawSetupMode"] {
+  const disableDeviceAuth = parseBooleanLike(config.disableDeviceAuth);
+  if (disableDeviceAuth !== null) {
+    return disableDeviceAuth ? "token_only" : "token_and_device_pairing";
+  }
+  if (typeof config.devicePrivateKeyPem === "string" && config.devicePrivateKeyPem.trim().length > 0) {
+    return "token_and_device_pairing";
+  }
+  return "token_only";
+}
+
+function stringifyJson(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return JSON.stringify(value, null, 2);
+}
+
+function adapterRequiresModel(adapterType: string): boolean {
+  return !BUILDER_MODEL_OPTIONAL_ADAPTERS.has(adapterType);
+}
+
+function hasStoredSecretRef(
+  settings: BuilderProviderSettings | null | undefined,
+  secretRefKey: "authTokenRef" | "apiKeyRef",
+): boolean {
+  const adapterConfig = settings?.adapterConfig;
+  if (!adapterConfig || typeof adapterConfig !== "object" || Array.isArray(adapterConfig)) {
+    return false;
+  }
+  const value = (adapterConfig as Record<string, unknown>)[secretRefKey];
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function settingsToFormValues(settings: BuilderProviderSettings | null): CreateConfigValues {
@@ -52,15 +95,18 @@ function settingsToFormValues(settings: BuilderProviderSettings | null): CreateC
     fastMode: (config.fastMode as boolean) ?? false,
     dangerouslyBypassSandbox: (config.dangerouslyBypassSandbox as boolean) ?? false,
     url: (config.url as string) ?? "",
-    accessToken: (config.accessToken as string) ?? undefined,
-    apiKey: (config.apiKey as string) ?? undefined,
+    accessToken: undefined,
+    openClawSetupMode: resolveOpenClawSetupMode(config),
+    apiKey: undefined,
     workspaceStrategyType: (config.workspaceStrategyType as string) ?? undefined,
     workspaceBaseRef: (config.workspaceBaseRef as string) ?? undefined,
     workspaceBranchTemplate: (config.workspaceBranchTemplate as string) ?? undefined,
     worktreeParentDir: (config.worktreeParentDir as string) ?? undefined,
-    payloadTemplateJson: (config.payloadTemplateJson as string) ?? undefined,
-    runtimeServicesJson: (config.runtimeServicesJson as string) ?? undefined,
-    artifactOutputsJson: (config.artifactOutputsJson as string) ?? undefined,
+    payloadTemplateJson: stringifyJson(config.payloadTemplate),
+    runtimeServicesJson: stringifyJson(config.workspaceRuntime),
+    artifactOutputsJson: Array.isArray(config.artifactOutputs) && config.artifactOutputs.length > 0
+      ? stringifyJson(config.artifactOutputs)
+      : undefined,
     maxTurnsPerRun: (config.maxTurnsPerRun as number) ?? 10,
     heartbeatEnabled: false,
     intervalSec: 300,
@@ -97,11 +143,16 @@ export function BuilderConfigEditor({ companyId }: { companyId: string }) {
     if (!formValues?.adapterType) return null;
     return getUIAdapter(formValues.adapterType);
   }, [formValues?.adapterType]);
+  const currentSettings = settingsQuery.data?.settings ?? null;
+  const selectedAdapterType = formValues?.adapterType ?? currentSettings?.adapterType ?? "claude_local";
+  const requiresModel = adapterRequiresModel(selectedAdapterType);
+  const hasStoredOpenClawToken = hasStoredSecretRef(currentSettings, "authTokenRef");
+  const hasStoredOttoApiKey = hasStoredSecretRef(currentSettings, "apiKeyRef");
 
   const mutation = useMutation({
     mutationFn: async () => {
       if (!formValues || !uiAdapter) return null;
-      if (!formValues.model?.trim()) {
+      if (requiresModel && !formValues.model?.trim()) {
         throw new Error("Please select a model before saving.");
       }
 
@@ -175,7 +226,19 @@ export function BuilderConfigEditor({ companyId }: { companyId: string }) {
         />
       </div>
 
-      {!formValues.model?.trim() ? (
+      {selectedAdapterType === "openclaw_gateway" && hasStoredOpenClawToken && !formValues.accessToken?.trim() ? (
+        <div className="text-xs text-muted-foreground">
+          A gateway token is already stored for this Builder configuration. Leave the field blank to keep it.
+        </div>
+      ) : null}
+
+      {selectedAdapterType === "otto_agent" && hasStoredOttoApiKey && !formValues.apiKey?.trim() ? (
+        <div className="text-xs text-muted-foreground">
+          An Otto API key is already stored for this Builder configuration. Leave the field blank to keep it.
+        </div>
+      ) : null}
+
+      {requiresModel && !formValues.model?.trim() ? (
         <div className="text-sm text-amber-600 dark:text-amber-400">
           Select a model before saving.
         </div>

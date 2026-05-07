@@ -68,7 +68,12 @@ vi.mock("../services/builder/tool-registry.js", () => ({
 }));
 
 vi.mock("../services/builder/adapter-executor.js", () => ({
-  BUILDER_SUPPORTED_ADAPTER_TYPES: ["claude_local", "codex_local"],
+  BUILDER_SUPPORTED_ADAPTER_TYPES: [
+    "claude_local",
+    "codex_local",
+    "openclaw_gateway",
+    "otto_agent",
+  ],
 }));
 
 import { builderService } from "../services/builder/index.js";
@@ -200,6 +205,65 @@ describe("builder service", () => {
     );
   });
 
+  it("creates sessions even when the Builder adapter config does not include a model", async () => {
+    mockSettingsStore.get.mockResolvedValue(
+      makeSettings({
+        adapterType: "openclaw_gateway",
+        adapterConfig: { url: "wss://gateway.example" },
+      }),
+    );
+    mockSessionStore.createSession.mockResolvedValue(
+      makeSession({
+        adapterType: "openclaw_gateway",
+        model: "",
+      }),
+    );
+
+    const service = builderService({} as never);
+    await service.createSession({
+      companyId,
+      createdByUserId: "board-user",
+      title: "Builder via gateway",
+    });
+
+    expect(mockSessionStore.createSession).toHaveBeenCalledWith({
+      companyId,
+      createdByUserId: "board-user",
+      title: "Builder via gateway",
+      adapterType: "openclaw_gateway",
+      model: "",
+    });
+  });
+
+  it("sends messages with model-less remote Builder adapters", async () => {
+    mockSettingsStore.get.mockResolvedValue(
+      makeSettings({
+        adapterType: "openclaw_gateway",
+        adapterConfig: { url: "wss://gateway.example" },
+      }),
+    );
+    mockSecretService.resolveAdapterConfigForRuntime.mockResolvedValue({
+      config: { url: "wss://gateway.example" },
+    });
+
+    const service = builderService({} as never);
+    await service.sendMessage({
+      companyId,
+      sessionId,
+      actor: { type: "user", id: "board-user" },
+      text: "Use the remote gateway builder.",
+    });
+
+    expect(mockRunBuilderTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adapterConfig: {
+          adapterType: "openclaw_gateway",
+          adapterConfig: { url: "wss://gateway.example" },
+        },
+      }),
+    );
+  });
+
   it("locks the resolved config for a running turn even if settings change later", async () => {
     let currentSettings = makeSettings({
       adapterType: "claude_local",
@@ -301,6 +365,15 @@ describe("builder service", () => {
           source: "company_settings",
         }),
       }),
+    );
+  });
+
+  it("includes OpenClaw and Otto in the Builder tool catalog adapter list", () => {
+    const service = builderService({} as never);
+    const catalog = service.getToolCatalog(companyId);
+
+    expect(catalog.supportedAdapterTypes).toEqual(
+      expect.arrayContaining(["openclaw_gateway", "otto_agent"]),
     );
   });
 

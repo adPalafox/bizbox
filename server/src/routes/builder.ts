@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
 import type { Db } from "@paperclipai/db";
+import { randomUUID } from "node:crypto";
 import {
   applyBuilderProposalSchema,
   createBuilderSessionSchema,
@@ -11,9 +12,11 @@ import { validate } from "../middleware/validate.js";
 import { builderService } from "../services/builder/index.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 import { logActivity } from "../services/activity-log.js";
+import { secretService } from "../services/secrets.js";
 import { logger } from "../middleware/logger.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import { forbidden, notFound } from "../errors.js";
+import type { BuilderProviderSettings } from "@paperclipai/shared";
 
 /**
  * Company AI Builder REST routes.
@@ -56,6 +59,198 @@ function actorIdentity(req: Request) {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function getHeaderValueIgnoreCase(headers: Record<string, unknown>, key: string): string | null {
+  for (const [entryKey, entryValue] of Object.entries(headers)) {
+    if (entryKey.toLowerCase() !== key.toLowerCase()) continue;
+    const value = asNonEmptyString(entryValue);
+    if (value) return value;
+  }
+  return null;
+}
+
+function deleteHeaderIgnoreCase(headers: Record<string, unknown>, key: string) {
+  for (const entryKey of Object.keys(headers)) {
+    if (entryKey.toLowerCase() === key.toLowerCase()) {
+      delete headers[entryKey];
+    }
+  }
+}
+
+function tokenFromAuthorizationHeader(value: string | null) {
+  if (!value) return null;
+  const match = value.match(/^bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || value.trim() || null;
+}
+
+function extractOpenClawAuthToken(adapterConfig: Record<string, unknown>) {
+  const explicit = asNonEmptyString(adapterConfig.authToken) ?? asNonEmptyString(adapterConfig.token);
+  if (explicit) return explicit;
+  const headers = asRecord(adapterConfig.headers) ?? {};
+  const tokenHeader = getHeaderValueIgnoreCase(headers, "x-openclaw-token");
+  if (tokenHeader) return tokenHeader;
+  const authHeader =
+    getHeaderValueIgnoreCase(headers, "x-openclaw-auth")
+    ?? getHeaderValueIgnoreCase(headers, "authorization");
+  return tokenFromAuthorizationHeader(authHeader);
+}
+
+function sanitizeOpenClawAdapterConfig(adapterConfig: Record<string, unknown>) {
+  const next = { ...adapterConfig };
+  delete next.authToken;
+  delete next.token;
+
+  const headers = asRecord(next.headers);
+  if (headers) {
+    const sanitizedHeaders = { ...headers };
+    deleteHeaderIgnoreCase(sanitizedHeaders, "x-openclaw-token");
+    deleteHeaderIgnoreCase(sanitizedHeaders, "x-openclaw-auth");
+    deleteHeaderIgnoreCase(sanitizedHeaders, "authorization");
+    next.headers = Object.keys(sanitizedHeaders).length > 0 ? sanitizedHeaders : undefined;
+  }
+
+  return next;
+}
+
+function sanitizeOttoAdapterConfig(adapterConfig: Record<string, unknown>) {
+  const next = { ...adapterConfig };
+  delete next.apiKey;
+  return next;
+}
+
+function buildBuilderSecretName(prefix: string) {
+  return `${prefix}-${randomUUID().slice(0, 8)}`;
+}
+
+async function persistBuilderSecrets(params: {
+  db: Db;
+  companyId: string;
+  adapterType: string;
+  adapterConfig: Record<string, unknown>;
+  existingSettings: BuilderProviderSettings | null;
+  actor: { userId?: string | null; agentId?: string | null };
+}) {
+  const secrets = secretService(params.db);
+
+  if (params.adapterType === "openclaw_gateway") {
+    const plainToken = extractOpenClawAuthToken(params.adapterConfig);
+    const sanitized = sanitizeOpenClawAdapterConfig(params.adapterConfig);
+    const existingRef = asRecord(params.existingSettings?.adapterConfig)?.authTokenRef;
+    const requestedRef = sanitized.authTokenRef ?? existingRef;
+
+    if (!plainToken) {
+      if (requestedRef !== undefined) {
+        const normalizedRef = await secrets.normalizeSecretRefBindingForPersistence(
+          params.companyId,
+          requestedRef,
+          "adapterConfig.authTokenRef",
+        );
+        return {
+          ...sanitized,
+          authTokenRef: normalizedRef,
+        };
+      }
+      return sanitized;
+    }
+
+    if (requestedRef !== undefined) {
+      const normalizedRef = await secrets.normalizeSecretRefBindingForPersistence(
+        params.companyId,
+        requestedRef,
+        "adapterConfig.authTokenRef",
+      );
+      await secrets.rotate(normalizedRef.secretId, { value: plainToken }, params.actor);
+      return {
+        ...sanitized,
+        authTokenRef: normalizedRef,
+      };
+    }
+
+    const secret = await secrets.create(
+      params.companyId,
+      {
+        name: buildBuilderSecretName("builder-openclaw-gateway-token"),
+        provider: "local_encrypted",
+        value: plainToken,
+        description: "OpenClaw gateway access token for AI Builder",
+      },
+      params.actor,
+    );
+    return {
+      ...sanitized,
+      authTokenRef: {
+        type: "secret_ref" as const,
+        secretId: secret.id,
+        version: "latest" as const,
+      },
+    };
+  }
+
+  if (params.adapterType === "otto_agent") {
+    const plainApiKey = asNonEmptyString(params.adapterConfig.apiKey);
+    const sanitized = sanitizeOttoAdapterConfig(params.adapterConfig);
+    const existingRef = asRecord(params.existingSettings?.adapterConfig)?.apiKeyRef;
+    const requestedRef = sanitized.apiKeyRef ?? existingRef;
+
+    if (!plainApiKey) {
+      if (requestedRef !== undefined) {
+        const normalizedRef = await secrets.normalizeSecretRefBindingForPersistence(
+          params.companyId,
+          requestedRef,
+          "adapterConfig.apiKeyRef",
+        );
+        return {
+          ...sanitized,
+          apiKeyRef: normalizedRef,
+        };
+      }
+      return sanitized;
+    }
+
+    if (requestedRef !== undefined) {
+      const normalizedRef = await secrets.normalizeSecretRefBindingForPersistence(
+        params.companyId,
+        requestedRef,
+        "adapterConfig.apiKeyRef",
+      );
+      await secrets.rotate(normalizedRef.secretId, { value: plainApiKey }, params.actor);
+      return {
+        ...sanitized,
+        apiKeyRef: normalizedRef,
+      };
+    }
+
+    const secret = await secrets.create(
+      params.companyId,
+      {
+        name: buildBuilderSecretName("builder-otto-agent-apikey"),
+        provider: "local_encrypted",
+        value: plainApiKey,
+        description: "Otto Agent API key for AI Builder",
+      },
+      params.actor,
+    );
+    return {
+      ...sanitized,
+      apiKeyRef: {
+        type: "secret_ref" as const,
+        secretId: secret.id,
+        version: "latest" as const,
+      },
+    };
+  }
+
+  return params.adapterConfig;
+}
+
 export function builderRoutes(db: Db) {
   const router = Router();
   const svc = builderService(db);
@@ -81,16 +276,29 @@ export function builderRoutes(db: Db) {
       const companyId = req.params.companyId as string;
       assertCompanyAccess(req, companyId);
       assertBoardActor(req);
-      const updated = await svc.upsertSettings(companyId, req.body);
+      const existingSettings = await svc.getSettings(companyId);
+      const actor = actorIdentity(req);
+      const adapterConfig = await persistBuilderSecrets({
+        db,
+        companyId,
+        adapterType: req.body.adapterType,
+        adapterConfig: req.body.adapterConfig,
+        existingSettings,
+        actor,
+      });
+      const updated = await svc.upsertSettings(companyId, {
+        adapterType: req.body.adapterType,
+        adapterConfig,
+      });
       res.json({ settings: updated });
       // Best-effort activity log — never fail settings update because of logging
-      const actor = getActorInfo(req);
+      const actorInfo = getActorInfo(req);
       logActivity(db, {
         companyId,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-        agentId: actor.agentId,
-        runId: actor.runId,
+        actorType: actorInfo.actorType,
+        actorId: actorInfo.actorId,
+        agentId: actorInfo.agentId,
+        runId: actorInfo.runId,
         action: "builder.settings_updated",
         entityType: "builder_provider_settings",
         entityId: companyId,
