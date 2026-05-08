@@ -29,6 +29,9 @@ export const queryKeys = {
       ["agents", companyId, "adapter-models", adapterType] as const,
     detectModel: (companyId: string, adapterType: string) =>
       ["agents", companyId, "detect-model", adapterType] as const,
+    thread: (agentId: string, companyId: string) => ["agents", companyId, agentId, "thread"] as const,
+    threadMessages: (agentId: string, companyId: string) =>
+      ["agents", companyId, agentId, "thread-messages"] as const,
   },
   issues: {
     list: (companyId: string) => ["issues", companyId] as const,
@@ -47,6 +50,7 @@ export const queryKeys = {
       ["issues", companyId, "execution-workspace", executionWorkspaceId] as const,
     detail: (id: string) => ["issues", "detail", id] as const,
     comments: (issueId: string) => ["issues", "comments", issueId] as const,
+    interactions: (issueId: string) => ["issues", "interactions", issueId] as const,
     feedbackVotes: (issueId: string) => ["issues", "feedback-votes", issueId] as const,
     attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
     documents: (issueId: string) => ["issues", "documents", issueId] as const,
@@ -81,6 +85,22 @@ export const queryKeys = {
   goals: {
     list: (companyId: string) => ["goals", companyId] as const,
     detail: (id: string) => ["goals", "detail", id] as const,
+  },
+  deliverables: {
+    list: (
+      companyId: string,
+      filters?: { projectId?: string; agentId?: string; q?: string; limit?: number; offset?: number },
+    ) =>
+      [
+        "deliverables",
+        companyId,
+        filters?.projectId ?? "__all-projects__",
+        filters?.agentId ?? "__all-agents__",
+        filters?.q ?? "",
+        filters?.limit ?? "__no-limit__",
+        filters?.offset ?? 0,
+      ] as const,
+    detail: (id: string) => ["deliverables", "detail", id] as const,
   },
   budgets: {
     overview: (companyId: string) => ["budgets", "overview", companyId] as const,

@@ -65,4 +65,25 @@ describe("openai_agent execute", () => {
     expect(result.sessionParams).toEqual({ previousResponseId: "resp_123" });
     expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 34, cachedInputTokens: undefined });
   });
+
+  it("omits store when storeResponses is disabled", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "resp_456",
+          output_text: "Completed the task.",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await execute(
+      makeContext({ authToken: "sk-test", model: "gpt-5", storeResponses: false }),
+    );
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({ model: "gpt-5" });
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("store");
+    expect(result.exitCode).toBe(0);
+  });
 });

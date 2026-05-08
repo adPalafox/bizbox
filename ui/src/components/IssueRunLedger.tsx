@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import type { Issue, Agent } from "@paperclipai/shared";
+import type { Issue, Agent, IssueWorkProduct } from "@paperclipai/shared";
+import { parseIssueArtifactWorkProductMetadata } from "@paperclipai/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@/lib/router";
 import { activityApi, type RunForIssue, type RunLivenessState } from "../api/activity";
@@ -7,12 +8,14 @@ import { heartbeatsApi, type ActiveRunForIssue, type LiveRunForIssue } from "../
 import { cn, relativeTime } from "../lib/utils";
 import { queryKeys } from "../lib/queryKeys";
 import { keepPreviousDataForSameQueryTail } from "../lib/query-placeholder-data";
+import { describeRunRetryState } from "../lib/runRetryState";
 
 type IssueRunLedgerProps = {
   issueId: string;
   issueStatus: Issue["status"];
   childIssues: Issue[];
   agentMap: ReadonlyMap<string, Agent>;
+  workProducts: IssueWorkProduct[];
   hasLiveRuns: boolean;
 };
 
@@ -23,6 +26,7 @@ type IssueRunLedgerContentProps = {
   issueStatus: Issue["status"];
   childIssues: Issue[];
   agentMap: ReadonlyMap<string, Pick<Agent, "name">>;
+  workProducts: IssueWorkProduct[];
 };
 
 type LedgerRun = RunForIssue & {
@@ -34,6 +38,12 @@ type LivenessCopy = {
   label: string;
   tone: string;
   description: string;
+};
+
+type RunArtifactSummary = {
+  id: string;
+  title: string;
+  contentPath: string;
 };
 
 const LIVENESS_COPY: Record<RunLivenessState, LivenessCopy> = {
@@ -78,6 +88,12 @@ const PENDING_LIVENESS_COPY: LivenessCopy = {
   label: "Checks after finish",
   tone: "border-border bg-background text-muted-foreground",
   description: "Liveness is evaluated after the run finishes.",
+};
+
+const RETRY_PENDING_LIVENESS_COPY: LivenessCopy = {
+  label: "Retry pending",
+  tone: "border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300",
+  description: "Paperclip queued an automatic retry that has not started yet.",
 };
 
 const MISSING_LIVENESS_COPY: LivenessCopy = {
@@ -174,10 +190,12 @@ function runSummary(run: LedgerRun, agentMap: ReadonlyMap<string, Pick<Agent, "n
   const agentName = compactAgentName(run, agentMap);
   if (run.status === "running") return `Running now by ${agentName}`;
   if (run.status === "queued") return `Queued for ${agentName}`;
+  if (run.status === "scheduled_retry") return `Automatic retry scheduled for ${agentName}`;
   return `${statusLabel(run.status)} by ${agentName}`;
 }
 
 function livenessCopyForRun(run: LedgerRun) {
+  if (run.status === "scheduled_retry") return RETRY_PENDING_LIVENESS_COPY;
   if (run.livenessState) return LIVENESS_COPY[run.livenessState];
   return isActiveRun(run) ? PENDING_LIVENESS_COPY : MISSING_LIVENESS_COPY;
 }
@@ -204,6 +222,7 @@ function stopReasonLabel(run: RunForIssue) {
 
 function stopStatusLabel(run: LedgerRun, stopReason: string | null) {
   if (stopReason) return stopReason;
+  if (run.status === "scheduled_retry") return "Retry pending";
   if (run.status === "queued") return "Waiting to start";
   if (run.status === "running") return "Still running";
   if (!run.livenessState) return "Unavailable";
@@ -211,6 +230,7 @@ function stopStatusLabel(run: LedgerRun, stopReason: string | null) {
 }
 
 function lastUsefulActionLabel(run: LedgerRun) {
+  if (run.status === "scheduled_retry") return "Waiting for next attempt";
   if (run.lastUsefulActionAt) return relativeTime(run.lastUsefulActionAt);
   if (isActiveRun(run)) return "No action recorded yet";
   if (run.livenessState === "plan_only" || run.livenessState === "needs_followup") {
@@ -246,12 +266,13 @@ export function IssueRunLedger({
   issueStatus,
   childIssues,
   agentMap,
+  workProducts,
   hasLiveRuns,
 }: IssueRunLedgerProps) {
   const { data: runs } = useQuery({
     queryKey: queryKeys.issues.runs(issueId),
     queryFn: () => activityApi.runsForIssue(issueId),
-    refetchInterval: hasLiveRuns ? 5000 : false,
+    refetchInterval: hasLiveRuns || issueStatus === "in_progress" ? 5000 : false,
     placeholderData: keepPreviousDataForSameQueryTail<RunForIssue[]>(issueId),
   });
   const { data: liveRuns } = useQuery({
@@ -277,6 +298,7 @@ export function IssueRunLedger({
       issueStatus={issueStatus}
       childIssues={childIssues}
       agentMap={agentMap}
+      workProducts={workProducts}
     />
   );
 }
@@ -288,8 +310,22 @@ export function IssueRunLedgerContent({
   issueStatus,
   childIssues,
   agentMap,
+  workProducts,
 }: IssueRunLedgerContentProps) {
   const ledgerRuns = useMemo(() => mergeRuns(runs, liveRuns, activeRun), [activeRun, liveRuns, runs]);
+  const artifactsByRunId = useMemo(() => {
+    const map = new Map<string, RunArtifactSummary[]>();
+    for (const product of workProducts) {
+      if (!product.createdByRunId) continue;
+      const metadata = parseIssueArtifactWorkProductMetadata(product);
+      if (!metadata) continue;
+      const entry: RunArtifactSummary = { id: product.id, title: product.title, contentPath: metadata.contentPath };
+      const existing = map.get(product.createdByRunId);
+      if (existing) existing.push(entry);
+      else map.set(product.createdByRunId, [entry]);
+    }
+    return map;
+  }, [workProducts]);
   const latestRun = ledgerRuns[0] ?? null;
   const children = childIssueSummary(childIssues);
 
@@ -361,6 +397,8 @@ export function IssueRunLedgerContent({
             const duration = formatDuration(run.startedAt, run.finishedAt);
             const exhausted = hasExhaustedContinuation(run);
             const continuation = continuationLabel(run);
+            const retryState = describeRunRetryState(run);
+            const artifacts = artifactsByRunId.get(run.runId) ?? [];
             return (
               <article key={run.runId} className="space-y-2 px-3 py-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -396,6 +434,16 @@ export function IssueRunLedgerContent({
                   {continuation ? (
                     <span className="text-[11px] text-muted-foreground">{continuation}</span>
                   ) : null}
+                  {retryState ? (
+                    <span
+                      className={cn(
+                        "rounded-md border px-1.5 py-0.5 text-[11px] font-medium",
+                        retryState.tone,
+                      )}
+                    >
+                      {retryState.badgeLabel}
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
@@ -413,6 +461,24 @@ export function IssueRunLedgerContent({
                   </div>
                 </div>
 
+                {retryState ? (
+                  <div className="rounded-md border border-border/70 bg-accent/20 px-2 py-2 text-xs leading-5 text-muted-foreground">
+                    {retryState.detail ? <p>{retryState.detail}</p> : null}
+                    {retryState.secondary ? <p>{retryState.secondary}</p> : null}
+                    {retryState.retryOfRunId ? (
+                      <p>
+                        Retry of{" "}
+                        <Link
+                          to={`/agents/${run.agentId}/runs/${retryState.retryOfRunId}`}
+                          className="font-mono text-foreground hover:underline"
+                        >
+                          {retryState.retryOfRunId.slice(0, 8)}
+                        </Link>
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {run.livenessReason ? (
                   <p className="min-w-0 break-words text-xs leading-5 text-muted-foreground">
                     {run.livenessReason}
@@ -423,6 +489,24 @@ export function IssueRunLedgerContent({
                   <div className="min-w-0 rounded-md bg-accent/40 px-2 py-1.5 text-xs leading-5">
                     <span className="font-medium text-foreground">Next action: </span>
                     <span className="break-words text-muted-foreground">{run.nextAction}</span>
+                  </div>
+                ) : null}
+
+                {artifacts.length > 0 ? (
+                  <div className="rounded-md border border-border/70 bg-accent/10 px-2 py-2 text-xs">
+                    <div className="font-medium text-foreground">Deliverables</div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {artifacts.map((artifact) => (
+                        <a
+                          key={artifact.id}
+                          href={artifact.contentPath}
+                          className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                          download
+                        >
+                          <span className="truncate">{artifact.title}</span>
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </article>

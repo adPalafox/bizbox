@@ -174,6 +174,35 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
     return { companyId, agentId, issueSvc, projectId, routine, svc, wakeups };
   }
 
+  async function seedRoutineExecutionRunFixture(status: "todo" | "blocked" | "cancelled" | "done") {
+    const { companyId, issueSvc, routine, svc } = await seedFixture();
+    const runId = randomUUID();
+    const issue = await issueSvc.create(companyId, {
+      projectId: routine.projectId,
+      title: routine.title,
+      description: routine.description,
+      status,
+      priority: routine.priority,
+      assigneeAgentId: routine.assigneeAgentId,
+      originKind: "routine_execution",
+      originId: routine.id,
+      originRunId: runId,
+    });
+
+    await db.insert(routineRuns).values({
+      id: runId,
+      companyId,
+      routineId: routine.id,
+      triggerId: null,
+      source: "manual",
+      status: "issue_created",
+      triggeredAt: new Date("2026-03-20T12:00:00.000Z"),
+      linkedIssueId: issue.id,
+    });
+
+    return { issueId: issue.id, runId, svc };
+  }
+
   it("creates a fresh execution issue when the previous routine issue is open but idle", async () => {
     const { companyId, issueSvc, routine, svc } = await seedFixture();
     const previousRunId = randomUUID();
@@ -347,6 +376,60 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
 
     expect(routineIssues).toHaveLength(1);
     expect(routineIssues[0]?.id).toBe(previousIssue.id);
+  });
+
+  it("does not coalesce live routine runs with different resolved variables", async () => {
+    const { companyId, agentId, projectId, svc } = await seedFixture();
+    const variableRoutine = await svc.create(
+      companyId,
+      {
+        projectId,
+        goalId: null,
+        parentIssueId: null,
+        title: "pre-pr for {{branch}}",
+        description: "Create a pre-PR from {{branch}}",
+        assigneeAgentId: agentId,
+        priority: "medium",
+        status: "active",
+        concurrencyPolicy: "coalesce_if_active",
+        catchUpPolicy: "skip_missed",
+        variables: [
+          { name: "branch", label: null, type: "text", defaultValue: null, required: true, options: [] },
+        ],
+      },
+      {},
+    );
+
+    const first = await svc.runRoutine(variableRoutine.id, {
+      source: "manual",
+      variables: { branch: "feature/a" },
+    });
+    const second = await svc.runRoutine(variableRoutine.id, {
+      source: "manual",
+      variables: { branch: "feature/b" },
+    });
+
+    expect(first.status).toBe("issue_created");
+    expect(second.status).toBe("issue_created");
+    expect(first.linkedIssueId).toBeTruthy();
+    expect(second.linkedIssueId).toBeTruthy();
+    expect(first.linkedIssueId).not.toBe(second.linkedIssueId);
+
+    const routineIssues = await db
+      .select({
+        id: issues.id,
+        title: issues.title,
+        originFingerprint: issues.originFingerprint,
+      })
+      .from(issues)
+      .where(eq(issues.originId, variableRoutine.id));
+
+    expect(routineIssues).toHaveLength(2);
+    expect(routineIssues.map((issue) => issue.title).sort()).toEqual([
+      "pre-pr for feature/a",
+      "pre-pr for feature/b",
+    ]);
+    expect(new Set(routineIssues.map((issue) => issue.originFingerprint)).size).toBe(2);
   });
 
   it("interpolates routine variables into the execution issue and stores resolved values", async () => {
@@ -862,5 +945,38 @@ describeEmbeddedPostgres("routine service live-execution coalescing", () => {
 
     expect(run.source).toBe("webhook");
     expect(run.status).toBe("issue_created");
+  });
+
+  it("keeps routine runs open when the linked execution issue is blocked", async () => {
+    const { issueId, runId, svc } = await seedRoutineExecutionRunFixture("blocked");
+
+    await svc.syncRunStatusForIssue(issueId);
+
+    const run = await db.select().from(routineRuns).where(eq(routineRuns.id, runId)).then((rows) => rows[0] ?? null);
+    expect(run?.status).toBe("issue_created");
+    expect(run?.failureReason).toBeNull();
+    expect(run?.completedAt).toBeNull();
+  });
+
+  it("fails routine runs when the linked execution issue is cancelled", async () => {
+    const { issueId, runId, svc } = await seedRoutineExecutionRunFixture("cancelled");
+
+    await svc.syncRunStatusForIssue(issueId);
+
+    const run = await db.select().from(routineRuns).where(eq(routineRuns.id, runId)).then((rows) => rows[0] ?? null);
+    expect(run?.status).toBe("failed");
+    expect(run?.failureReason).toBe("Execution issue moved to cancelled");
+    expect(run?.completedAt).toBeTruthy();
+  });
+
+  it("completes routine runs when the linked execution issue is done", async () => {
+    const { issueId, runId, svc } = await seedRoutineExecutionRunFixture("done");
+
+    await svc.syncRunStatusForIssue(issueId);
+
+    const run = await db.select().from(routineRuns).where(eq(routineRuns.id, runId)).then((rows) => rows[0] ?? null);
+    expect(run?.status).toBe("completed");
+    expect(run?.failureReason).toBeNull();
+    expect(run?.completedAt).toBeTruthy();
   });
 });

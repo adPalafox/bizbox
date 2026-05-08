@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -79,5 +80,21 @@ func TestResolveBrowserExecutablePathPrefersExplicitValue(t *testing.T) {
 	got := resolveBrowserExecutablePath("/tmp/custom-browser")
 	if got != "/tmp/custom-browser" {
 		t.Fatalf("expected explicit path to win, got %q", got)
+	}
+}
+
+func TestAcquireExecutionSlotRejectsWhenBusy(t *testing.T) {
+	slots := make(chan struct{}, 1)
+	slots <- struct{}{}
+	_, err := acquireExecutionSlot(context.Background(), slots)
+	if err == nil || err.Error() != "executor_busy" {
+		t.Fatalf("expected executor_busy, got %v", err)
+	}
+}
+
+func TestFillAssigneeSearchJSUsesNativeInputSetter(t *testing.T) {
+	js := fillAssigneeSearchJS("Risk Witherspoon")
+	if !strings.Contains(js, "Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set") {
+		t.Fatalf("expected native HTMLInputElement value setter in generated JS")
 	}
 }

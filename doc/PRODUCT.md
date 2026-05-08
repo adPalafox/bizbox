@@ -56,6 +56,16 @@ Tasks have parentage. Every task exists in service of a parent task, all the way
 
 More detailed task structure TBD.
 
+### Deliverables
+
+When an agent produces a downloadable file artifact while working on a task, that artifact is recorded as an `issue_work_products` row of type `artifact`. The board surfaces these across the whole company in the **Work → Deliverables** tab:
+
+- A flat, downloadable list of every artifact, newest first.
+- Each row links to the **root** task the deliverable was originally requested from, and to the **child** task the agent actually worked on, plus the agent that generated it.
+- Opening a deliverable shows an inline preview where possible (image, PDF), a one-click download, and the full chain back to the originating task and the run that produced it.
+
+The Deliverables tab is read-only; per-task editing of work products still happens on the issue detail page.
+
 ## Principles
 
 1. **Unopinionated about how you run your agents.** Your agents could be OpenClaw bots, Python scripts, Node scripts, Claude Code sessions, Codex instances — we don't care. Bizbox defines the control plane for communication and provides utility infrastructure for heartbeats. It does not mandate an agent runtime.
@@ -105,7 +115,7 @@ Bizbox’s core identity is a **control plane for autonomous AI companies**, cen
 
 - Stay **board-level and company-level**. Users should manage goals, orgs, budgets, approvals, and outputs.
 - Make the first five minutes feel magical: install, answer a few questions, see a CEO do something real.
-- Keep work anchored to **issues/comments/projects/goals**, even if the surface feels conversational.
+- Keep work anchored to **issues/comments/projects/goals**, even if the surface feels conversational. Explicit exception: `agent thread` is a direct board-to-agent communication surface that can spawn visible work but is not itself a work item.
 - Treat **agency / internal team / startup** as the same underlying abstraction with different templates and labels.
 - Make outputs first-class: files, docs, reports, previews, links, screenshots.
 - Provide **hooks into engineering workflows**: worktrees, preview servers, PR links, external review tools.
@@ -113,7 +123,7 @@ Bizbox’s core identity is a **control plane for autonomous AI companies**, cen
 
 **Do not**
 
-- Do not make the core product a general chat app. The current product definition is explicitly task/comment-centric and “not a chatbot,” and that boundary is valuable.
+- Do not make the core product a general chat app. The current product definition is explicitly task/comment-centric and “not a chatbot,” and that boundary is valuable. Explicit exception: per-agent `Chat` is backed by a first-class `agent thread` communication object for direct board-to-agent conversation.
 - Do not build a complete Jira/GitHub replacement. The repo/docs already position Bizbox as organization orchestration, not focused on pull-request review.
 - Do not build enterprise-grade RBAC first. The current V1 spec still treats multi-board governance and fine-grained human permissions as out of scope, so the first multi-user version should be coarse and company-scoped.
 - Do not lead with raw bash logs and transcripts. Default view should be human-readable intent/progress, with raw detail beneath.
@@ -127,8 +137,8 @@ Bizbox’s core identity is a **control plane for autonomous AI companies**, cen
 2. **Board-level abstraction always wins**
    The default UI should answer: what is the company doing, who is doing it, why does it matter, what did it cost, and what needs my approval.
 
-3. **Conversation stays attached to work objects**
-   “Chat with CEO” should still resolve to strategy threads, decisions, tasks, or approvals.
+3. **Conversation stays attached to work objects, except agent thread**
+   Most product conversation should resolve to strategy threads, decisions, tasks, or approvals. The explicit exception is `agent thread`: one direct company-human to agent communication channel per agent that can spawn visible work but is not itself a task.
 
 4. **Progressive disclosure**
    Top layer: human-readable summary. Middle layer: checklist/steps/artifacts. Bottom layer: raw logs/tool calls/transcript.

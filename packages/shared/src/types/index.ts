@@ -1,4 +1,5 @@
 export type { Company } from "./company.js";
+export type { Environment, EnvironmentLease, LocalEnvironmentConfig } from "./environment.js";
 export type {
   FeedbackVote,
   FeedbackDataSharingPreference,
@@ -66,6 +67,7 @@ export type {
   OpenClawConnectionState,
   OpenClawConnectionTestResult,
 } from "./agent.js";
+export type { AgentThread, AgentThreadMessage, AgentThreadReadState } from "./agent-thread.js";
 export type { AssetImage } from "./asset.js";
 export type { Project, ProjectCodebase, ProjectCodebaseOrigin, ProjectGoalRef, ProjectWorkspace } from "./project.js";
 export type {
@@ -105,10 +107,24 @@ export type {
   IssueWorkProductProvider,
   IssueWorkProductStatus,
   IssueWorkProductReviewState,
+  IssueArtifactWorkProductMetadata,
 } from "./work-product.js";
+export {
+  isIssueArtifactWorkProductMetadata,
+  parseIssueArtifactWorkProductMetadata,
+} from "./work-product.js";
+export type {
+  DeliverableAgentRef,
+  DeliverableDetail,
+  DeliverableIssueRef,
+  DeliverableListItem,
+} from "./deliverable.js";
 export type {
   Issue,
   IssueAssigneeAdapterOverrides,
+  IssueReferenceSource,
+  IssueRelatedWorkItem,
+  IssueRelatedWorkSummary,
   IssueRelation,
   IssueRelationIssueSummary,
   IssueExecutionPolicy,
@@ -118,6 +134,28 @@ export type {
   IssueExecutionStagePrincipal,
   IssueExecutionDecision,
   IssueComment,
+  IssueThreadInteractionActorFields,
+  SuggestedTaskDraft,
+  SuggestTasksPayload,
+  SuggestTasksResultCreatedTask,
+  SuggestTasksResult,
+  AskUserQuestionsQuestionOption,
+  AskUserQuestionsQuestion,
+  AskUserQuestionsPayload,
+  AskUserQuestionsAnswer,
+  AskUserQuestionsResult,
+  RequestConfirmationIssueDocumentTarget,
+  RequestConfirmationCustomTarget,
+  RequestConfirmationTarget,
+  RequestConfirmationPayload,
+  RequestConfirmationResult,
+  IssueThreadInteractionBase,
+  SuggestTasksInteraction,
+  AskUserQuestionsInteraction,
+  RequestConfirmationInteraction,
+  IssueThreadInteraction,
+  IssueThreadInteractionPayload,
+  IssueThreadInteractionResult,
   IssueDocument,
   IssueDocumentSummary,
   DocumentRevision,
@@ -270,3 +308,25 @@ export type {
   PluginDatabaseNamespaceMode,
   PluginDatabaseNamespaceStatus,
 } from "./plugin.js";
+export type {
+  BuilderSessionState,
+  BuilderMessageRole,
+  BuilderProposalStatus,
+  BuilderRuntimeConfigSummary,
+  BuilderHandoffTarget,
+  BuilderToolCall,
+  BuilderToolResult,
+  BuilderMessageContent,
+  BuilderMessage,
+  BuilderSession,
+  BuilderSessionDetail,
+  BuilderProviderSettings,
+  BuilderToolDescriptor,
+  BuilderToolCatalog,
+  BuilderProposal,
+} from "./builder.js";
+export {
+  BUILDER_SESSION_STATES,
+  BUILDER_MESSAGE_ROLES,
+  BUILDER_PROPOSAL_STATUSES,
+} from "./builder.js";

@@ -1,7 +1,3 @@
-import type { ServerAdapterModule } from "@paperclipai/adapter-utils";
-import { execute } from "./server/execute.js";
-import { testEnvironment } from "./server/test.js";
-
 export const type = "openai_agent";
 export const label = "OpenAI Agent";
 
@@ -36,6 +32,7 @@ Optional fields:
 - reasoningEffort (string, optional): low, medium, or high for reasoning-capable models
 - workflowInstruction (string, optional): stable system instruction prepended to each run
 - studioUrl (string, optional): human reference link to a related ChatGPT Agent Studio page
+- storeResponses (boolean, optional): when true, include \`store: true\` in Responses API requests. Default: true
 - includeContextJson (boolean, optional): append structured Bizbox context JSON to the prompt. Default: true
 - timeoutSec (number, optional): request timeout in seconds. Default: 600
 
@@ -47,14 +44,3 @@ Security notes:
 - Prefer authTokenRef over inline authToken in long-lived environments.
 - Bizbox resolves authTokenRef at runtime using the company secret store.
 `;
-
-const adapter: ServerAdapterModule = {
-  type,
-  execute,
-  testEnvironment,
-  models,
-  agentConfigurationDoc,
-};
-
-export { execute, testEnvironment };
-export default adapter;

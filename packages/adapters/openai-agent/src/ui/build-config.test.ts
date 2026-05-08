@@ -29,6 +29,7 @@ describe("buildOpenAiAgentConfig", () => {
       adapterSchemaValues: {
         workflowInstruction: "Review the issue and respond.",
         reasoningEffort: "medium",
+        storeResponses: false,
         includeContextJson: true,
       },
     });
@@ -38,6 +39,7 @@ describe("buildOpenAiAgentConfig", () => {
       model: "gpt-5",
       workflowInstruction: "Review the issue and respond.",
       reasoningEffort: "medium",
+      storeResponses: false,
       includeContextJson: true,
     });
   });

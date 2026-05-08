@@ -40,11 +40,14 @@ Expected request body:
   - default: `true`
 - `CLICKUP_BROWSER_EXECUTOR_TIMEOUT_SEC`
   - default: `90`
+- `CLICKUP_BROWSER_EXECUTOR_MAX_CONCURRENT_SESSIONS`
+  - default: `2`
 
 ## Local run
 
 ```sh
 cd cmd/clickup-browser-executor
+go build ./...
 go run .
 ```
 
@@ -73,3 +76,5 @@ The remote machine must already have:
 - Chrome or Chromium installed
 - a persistent browser profile that is logged into ClickUp
 - network access to `app.clickup.com`
+
+Do not commit platform-specific binaries from this directory. Build the executor from source on the target machine or in CI using `go build ./...`.

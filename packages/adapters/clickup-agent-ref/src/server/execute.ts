@@ -1,5 +1,6 @@
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import { asNumber, asString, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import { parseClickUpCommentResponse, parseClickUpTaskResponse } from "./parse.js";
 
 type ClickUpTriggerMode = "api_comment_only" | "automation_trigger";
 
@@ -19,22 +20,9 @@ type ClickUpAgentRefConfig = {
   timeoutSec: number;
 };
 
-type ClickUpTaskResponse = {
-  id?: unknown;
-  name?: unknown;
-  url?: unknown;
-  status?: {
-    status?: unknown;
-  };
-};
-
 type ClickUpCommentUser = {
   id?: unknown;
   username?: unknown;
-};
-
-type ClickUpCommentResponse = {
-  comments?: unknown;
 };
 
 type ClickUpCommentEntry = {
@@ -330,22 +318,6 @@ async function syncTaskDetails(
   }
 }
 
-function extractTaskResponse(rawText: string): ClickUpTaskResponse {
-  try {
-    return JSON.parse(rawText) as ClickUpTaskResponse;
-  } catch {
-    return {};
-  }
-}
-
-function extractCommentResponse(rawText: string): ClickUpCommentResponse {
-  try {
-    return JSON.parse(rawText) as ClickUpCommentResponse;
-  } catch {
-    return {};
-  }
-}
-
 function normalizeCommentText(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
@@ -445,9 +417,7 @@ async function fetchAgentRepliesForComment(
     );
   }
 
-  const replies = extractCommentResponse(repliesResult.text).comments;
-  if (!Array.isArray(replies)) return [];
-  return replies
+  return parseClickUpCommentResponse(repliesResult.text).comments
     .map((reply) => toImportedComment(reply, config, true))
     .filter((reply): reply is ClickUpCommentEntry => reply !== null);
 }
@@ -477,10 +447,7 @@ async function fetchNewAgentComments(
     );
   }
 
-  const rawComments = extractCommentResponse(taskCommentsResult.text).comments;
-  if (!Array.isArray(rawComments)) {
-    return { importedComments: [], syncedCommentIds: Array.from(syncedIds) };
-  }
+  const rawComments = parseClickUpCommentResponse(taskCommentsResult.text).comments;
 
   const imported: ClickUpCommentEntry[] = [];
   for (const rawComment of rawComments) {
@@ -575,9 +542,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         };
       }
 
-      const task = extractTaskResponse(createResult.text);
-      const taskId = typeof task.id === "string" ? task.id : null;
-      const taskUrl = typeof task.url === "string" ? task.url : config.clickupAgentUrl ?? null;
+      const task = parseClickUpTaskResponse(createResult.text);
+      const taskId = task.taskId;
+      const taskUrl = task.taskUrl ?? config.clickupAgentUrl ?? null;
       const summary = taskId
         ? `Created ClickUp task ${taskId}${config.clickupAgentName ? ` for ${config.clickupAgentName}` : ""}.`
         : `Created ClickUp task${config.clickupAgentName ? ` for ${config.clickupAgentName}` : ""}.`;

@@ -29,6 +29,9 @@ export function buildOpenAiAgentConfig(v: CreateConfigValues): Record<string, un
   if (typeof adapterSchemaValues.studioUrl === "string" && adapterSchemaValues.studioUrl.trim()) {
     config.studioUrl = adapterSchemaValues.studioUrl.trim();
   }
+  if (typeof adapterSchemaValues.storeResponses === "boolean") {
+    config.storeResponses = adapterSchemaValues.storeResponses;
+  }
 
   return config;
 }

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,8 +24,9 @@ import (
 )
 
 const (
-	defaultBindAddr = "127.0.0.1:8787"
-	maxBodyBytes    = 1 << 20
+	defaultBindAddr              = "127.0.0.1:8787"
+	maxBodyBytes                 = 1 << 20
+	defaultMaxConcurrentSessions = 2
 )
 
 var candidateBrowserPaths = []string{
@@ -44,6 +46,8 @@ type serverConfig struct {
 	defaultExecutablePath string
 	defaultHeadless       bool
 	defaultTimeout        time.Duration
+	maxConcurrentSessions int
+	sessionSlots          chan struct{}
 }
 
 type assignTaskRequest struct {
@@ -89,6 +93,18 @@ func main() {
 		Handler:           logRequests(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-shutdownCtx.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		log.Printf("shutdown signal received; draining clickup-browser-executor")
+		if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("shutdown error: %v", err)
+		}
+	}()
 
 	log.Printf("clickup-browser-executor listening on http://%s", cfg.bindAddr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -197,6 +213,15 @@ func loadConfig() (serverConfig, error) {
 		timeout = parsed
 	}
 
+	maxConcurrentSessions := defaultMaxConcurrentSessions
+	if raw := strings.TrimSpace(os.Getenv("CLICKUP_BROWSER_EXECUTOR_MAX_CONCURRENT_SESSIONS")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			return serverConfig{}, errors.New("invalid CLICKUP_BROWSER_EXECUTOR_MAX_CONCURRENT_SESSIONS")
+		}
+		maxConcurrentSessions = parsed
+	}
+
 	return serverConfig{
 		bindAddr:              bindAddr,
 		apiKey:                strings.TrimSpace(os.Getenv("CLICKUP_BROWSER_EXECUTOR_API_KEY")),
@@ -204,6 +229,8 @@ func loadConfig() (serverConfig, error) {
 		defaultExecutablePath: strings.TrimSpace(os.Getenv("CLICKUP_BROWSER_EXECUTOR_BROWSER_PATH")),
 		defaultHeadless:       parseBoolEnv("CLICKUP_BROWSER_EXECUTOR_HEADLESS", true),
 		defaultTimeout:        timeout,
+		maxConcurrentSessions: maxConcurrentSessions,
+		sessionSlots:          make(chan struct{}, maxConcurrentSessions),
 	}, nil
 }
 
@@ -251,6 +278,13 @@ func handleAssignTask(cfg serverConfig, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	release, err := acquireExecutionSlot(r.Context(), cfg.sessionSlots)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: err.Error()})
+		return
+	}
+	defer release()
+
 	if err := assignClickUpTask(r.Context(), execCfg); err != nil {
 		writeJSON(w, http.StatusBadGateway, errorResponse{Error: err.Error()})
 		return
@@ -262,6 +296,22 @@ func handleAssignTask(cfg serverConfig, w http.ResponseWriter, r *http.Request) 
 		TaskURL:   req.TaskURL,
 		AgentName: req.ClickUpAgentName,
 	})
+}
+
+func acquireExecutionSlot(ctx context.Context, slots chan struct{}) (func(), error) {
+	if slots == nil {
+		return func() {}, nil
+	}
+	select {
+	case slots <- struct{}{}:
+		return func() {
+			<-slots
+		}, nil
+	case <-ctx.Done():
+		return nil, errors.New("request_cancelled")
+	default:
+		return nil, errors.New("executor_busy")
+	}
 }
 
 func authorizeRequest(apiKey string, r *http.Request) error {
@@ -451,14 +501,22 @@ const clickAssigneeControlJS = `(function () {
 func fillAssigneeSearchJS(agentName string) string {
 	return fmt.Sprintf(`(function () {
   const agentName = %q;
+  const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  const assignValue = (el, value) => {
+    if (valueSetter && el instanceof HTMLInputElement) {
+      valueSetter.call(el, value);
+      return;
+    }
+    el.value = value;
+  };
   const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type]), textarea'));
   for (const el of inputs) {
     const text = ((el.getAttribute('placeholder') || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
     if (text.includes('search') || text.includes('assign')) {
       el.focus();
-      el.value = '';
+      assignValue(el, '');
       el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.value = agentName;
+      assignValue(el, agentName);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
@@ -467,9 +525,9 @@ func fillAssigneeSearchJS(agentName string) string {
   const fallback = inputs[0];
   if (!fallback) throw new Error('Could not locate the assignee search input.');
   fallback.focus();
-  fallback.value = '';
+  assignValue(fallback, '');
   fallback.dispatchEvent(new Event('input', { bubbles: true }));
-  fallback.value = agentName;
+  assignValue(fallback, agentName);
   fallback.dispatchEvent(new Event('input', { bubbles: true }));
   fallback.dispatchEvent(new Event('change', { bubbles: true }));
   return true;

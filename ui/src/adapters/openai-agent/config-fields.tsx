@@ -124,6 +124,15 @@ export function OpenAiAgentConfigFields(props: AdapterConfigFieldsProps) {
       <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input
           type="checkbox"
+          checked={readBooleanSchemaValue(props, "storeResponses", true)}
+          onChange={(event) => writeBooleanSchemaValue(props, "storeResponses", event.target.checked)}
+        />
+        Persist Responses API state with <code>store: true</code>
+      </label>
+
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
           checked={readBooleanSchemaValue(props, "includeContextJson", true)}
           onChange={(event) => writeBooleanSchemaValue(props, "includeContextJson", event.target.checked)}
         />

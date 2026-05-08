@@ -9,6 +9,22 @@ import {
 } from "@paperclipai/adapter-openclaw-gateway/ui";
 import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
 
+function extractStructuredWakePayload(message: unknown): Record<string, unknown> | null {
+  const text = String(message ?? "");
+  const marker = "Structured wake payload JSON:";
+  const markerIndex = text.indexOf(marker);
+  if (markerIndex < 0) return null;
+  const jsonStart = text.indexOf("```json", markerIndex);
+  if (jsonStart < 0) return null;
+  const bodyStart = text.indexOf("\n", jsonStart);
+  if (bodyStart < 0) return null;
+  const fenceEnd = text.indexOf("\n```", bodyStart);
+  if (fenceEnd < 0) return null;
+  const json = text.slice(bodyStart + 1, fenceEnd).trim();
+  if (!json) return null;
+  return JSON.parse(json) as Record<string, unknown>;
+}
+
 function buildContext(
   config: Record<string, unknown>,
   overrides?: Partial<AdapterExecutionContext>,
@@ -42,6 +58,8 @@ function buildContext(
 
 async function createMockGatewayServer(options?: {
   waitPayload?: Record<string, unknown>;
+  artifactListPayload?: Record<string, unknown> | unknown[];
+  artifactDownloads?: Record<string, Record<string, unknown>>;
 }) {
   const server = createServer();
   const wss = new WebSocketServer({ server });
@@ -150,6 +168,43 @@ async function createMockGatewayServer(options?: {
               startedAt: 1,
               endedAt: 2,
             },
+          }),
+        );
+        return;
+      }
+
+      if (frame.method === "artifacts.list") {
+        socket.send(
+          JSON.stringify({
+            type: "res",
+            id: frame.id,
+            ok: true,
+            payload: options?.artifactListPayload ?? { artifacts: [] },
+          }),
+        );
+        return;
+      }
+
+      if (frame.method === "artifacts.download") {
+        const key = String(frame.params?.sourcePath ?? frame.params?.path ?? frame.params?.artifactId ?? frame.params?.id ?? "");
+        const payload = options?.artifactDownloads?.[key];
+        if (!payload) {
+          socket.send(
+            JSON.stringify({
+              type: "res",
+              id: frame.id,
+              ok: false,
+              error: { code: "NOT_FOUND", message: `no artifact payload for ${key}` },
+            }),
+          );
+          return;
+        }
+        socket.send(
+          JSON.stringify({
+            type: "res",
+            id: frame.id,
+            ok: true,
+            payload,
           }),
         );
       }
@@ -531,8 +586,22 @@ describe("openclaw gateway adapter execute", () => {
       expect(String(payload?.message ?? "")).toContain("First comment");
       expect(String(payload?.message ?? "")).toContain("\"commentIds\":[\"comment-1\",\"comment-2\"]");
       expect(String(payload?.message ?? "")).toContain("\"latestCommentId\":\"comment-2\"");
-      // Regression guard for #606/#617/#626: OpenClaw rejects unknown top-level agent params.
       expect(payload?.paperclip).toBeUndefined();
+      expect(extractStructuredWakePayload(payload?.message)).toMatchObject({
+        reason: "issue_commented",
+        issue: {
+          id: "issue-123",
+          identifier: "PAP-874",
+          title: "chat-speed issues",
+          status: "in_progress",
+          priority: "medium",
+        },
+        commentIds: ["comment-1", "comment-2"],
+        latestCommentId: "comment-2",
+        requestedCount: 2,
+        includedCount: 2,
+        missingCount: 0,
+      });
 
       expect(logs.some((entry) => entry.includes("[openclaw-gateway:event] run=run-123 stream=assistant"))).toBe(true);
     } finally {
@@ -557,6 +626,95 @@ describe("openclaw gateway adapter execute", () => {
       expect(gateway.getAgentPayload()?.scopes).toBeUndefined();
     } finally {
       await gateway.close();
+    }
+  });
+
+  it("uses the Builder prompt as the outbound gateway message in Builder mode", async () => {
+    const gateway = await createMockGatewayServer();
+
+    try {
+      const result = await execute(
+        buildContext(
+          {
+            url: gateway.url,
+            authToken: "gateway-token",
+            payloadTemplate: {
+              message: "Builder preface",
+            },
+            waitTimeoutMs: 2000,
+          },
+          {
+            context: {
+              executionMode: "builder",
+              builderInvocationId: "builder-turn-123",
+              prompt: "Return strict JSON only.",
+            },
+          },
+        ),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(gateway.getAgentPayload()).toEqual(
+        expect.objectContaining({
+          sessionKey: "paperclip:builder:builder-turn-123",
+          message: "Builder preface\n\nReturn strict JSON only.",
+        }),
+      );
+      expect(extractStructuredWakePayload(gateway.getAgentPayload()?.message)).toBeNull();
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("isolates OpenClaw Builder turns with per-turn session keys", async () => {
+    const firstGateway = await createMockGatewayServer();
+    const secondGateway = await createMockGatewayServer();
+
+    try {
+      await execute(
+        buildContext(
+          {
+            url: firstGateway.url,
+            authToken: "gateway-token",
+            agentId: "meridian",
+            waitTimeoutMs: 2000,
+          },
+          {
+            context: {
+              executionMode: "builder",
+              builderInvocationId: "turn-1",
+              prompt: "First prompt",
+            },
+          },
+        ),
+      );
+      await execute(
+        buildContext(
+          {
+            url: secondGateway.url,
+            authToken: "gateway-token",
+            agentId: "meridian",
+            waitTimeoutMs: 2000,
+          },
+          {
+            context: {
+              executionMode: "builder",
+              builderInvocationId: "turn-2",
+              prompt: "Second prompt",
+            },
+          },
+        ),
+      );
+
+      expect(firstGateway.getAgentPayload()?.sessionKey).toBe(
+        "agent:meridian:paperclip:builder:turn-1",
+      );
+      expect(secondGateway.getAgentPayload()?.sessionKey).toBe(
+        "agent:meridian:paperclip:builder:turn-2",
+      );
+    } finally {
+      await firstGateway.close();
+      await secondGateway.close();
     }
   });
 
@@ -651,6 +809,152 @@ describe("openclaw gateway adapter execute", () => {
           status: "running",
         }),
       ]);
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("collects declared artifact outputs through gateway artifact RPCs", async () => {
+    const gateway = await createMockGatewayServer({
+      artifactListPayload: {
+        artifacts: [
+          {
+            id: "artifact-1",
+            sourcePath: "deliverables/final-packet.md",
+            contentType: "text/markdown",
+          },
+          {
+            id: "artifact-2",
+            sourcePath: "deliverables/articles/post-1.md",
+            contentType: "text/markdown",
+          },
+        ],
+      },
+      artifactDownloads: {
+        "deliverables/final-packet.md": {
+          contentType: "text/markdown",
+          bodyBase64: Buffer.from("# Final packet\n", "utf8").toString("base64"),
+        },
+        "deliverables/articles/post-1.md": {
+          contentType: "text/markdown",
+          bodyBase64: Buffer.from("# Article\n", "utf8").toString("base64"),
+        },
+      },
+    });
+
+    try {
+      const result = await execute(
+        buildContext({
+          url: gateway.url,
+          authToken: "gateway-token",
+          artifactOutputs: [
+            { pattern: "deliverables/final-packet.md", title: "Final packet", primary: true },
+            { pattern: "deliverables/articles/*.md", title: "Article draft" },
+          ],
+          waitTimeoutMs: 2000,
+        }),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.artifacts).toEqual([
+        expect.objectContaining({
+          title: "Final packet",
+          sourcePath: "deliverables/final-packet.md",
+          contentType: "text/markdown",
+          byteSize: Buffer.byteLength("# Final packet\n"),
+          isPrimary: true,
+        }),
+        expect.objectContaining({
+          title: "Article draft",
+          sourcePath: "deliverables/articles/post-1.md",
+          contentType: "text/markdown",
+          byteSize: Buffer.byteLength("# Article\n"),
+          isPrimary: false,
+        }),
+      ]);
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("deduplicates repeated artifact pattern matches and skips invalid patterns", async () => {
+    const gateway = await createMockGatewayServer({
+      artifactListPayload: {
+        artifacts: [
+          {
+            id: "artifact-1",
+            sourcePath: "deliverables/final-packet.md",
+            contentType: "text/markdown",
+          },
+        ],
+      },
+      artifactDownloads: {
+        "deliverables/final-packet.md": {
+          contentType: "text/markdown",
+          bodyBase64: Buffer.from("# Final packet\n", "utf8").toString("base64"),
+        },
+      },
+    });
+    const logs: string[] = [];
+
+    try {
+      const result = await execute(
+        buildContext(
+          {
+            url: gateway.url,
+            authToken: "gateway-token",
+            artifactOutputs: [
+              { pattern: "deliverables/*.md" },
+              { pattern: "deliverables/final-packet.md" },
+              { pattern: "../escape.md" },
+            ],
+            waitTimeoutMs: 2000,
+          },
+          {
+            onLog: async (_stream, chunk) => {
+              logs.push(chunk);
+            },
+          },
+        ),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.artifacts).toHaveLength(1);
+      expect(result.artifacts?.[0]?.sourcePath).toBe("deliverables/final-packet.md");
+      expect(logs.some((entry) => entry.includes("artifact download failed"))).toBe(false);
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("keeps the run successful when declared artifact outputs are missing", async () => {
+    const gateway = await createMockGatewayServer({
+      artifactListPayload: {
+        artifacts: [],
+      },
+    });
+    const logs: string[] = [];
+
+    try {
+      const result = await execute(
+        buildContext(
+          {
+            url: gateway.url,
+            authToken: "gateway-token",
+            artifactOutputs: [{ pattern: "deliverables/*.md" }],
+            waitTimeoutMs: 2000,
+          },
+          {
+            onLog: async (_stream, chunk) => {
+              logs.push(chunk);
+            },
+          },
+        ),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.artifacts).toBeUndefined();
+      expect(logs.some((entry) => entry.includes("no artifact matched"))).toBe(false);
     } finally {
       await gateway.close();
     }

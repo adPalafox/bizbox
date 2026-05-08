@@ -1,7 +1,3 @@
-import type { ServerAdapterModule } from "@paperclipai/adapter-utils";
-import { execute } from "./server/execute.js";
-import { testEnvironment } from "./server/test.js";
-
 export const type = "clickup_agent_ref";
 export const label = "ClickUp Agent Reference";
 
@@ -47,15 +43,3 @@ Security notes:
 - Prefer authTokenRef for long-lived environments.
 - This adapter is a bridge/reference adapter; it relies on native ClickUp triggers and Automations rather than direct public AI-agent execution APIs.
 `;
-
-const adapter: ServerAdapterModule = {
-  type,
-  execute,
-  testEnvironment,
-  models,
-  requiresLiveExecutionPath: false,
-  agentConfigurationDoc,
-};
-
-export { execute, testEnvironment };
-export default adapter;

@@ -25,6 +25,16 @@ export {
   type UpdateCompanyBranding,
 } from "./company.js";
 export {
+  environmentDriverSchema,
+  environmentStatusSchema,
+  environmentLeaseStatusSchema,
+  environmentLeaseCleanupStatusSchema,
+  createEnvironmentSchema,
+  updateEnvironmentSchema,
+  type CreateEnvironment,
+  type UpdateEnvironment,
+} from "./environment.js";
+export {
   feedbackDataSharingPreferenceSchema,
   feedbackTargetTypeSchema,
   feedbackTraceStatusSchema,
@@ -125,6 +135,12 @@ export {
   type TestOpenClawConnection,
   type UpdateAgentPermissions,
 } from "./agent.js";
+export {
+  postAgentThreadMessageSchema,
+  markAgentThreadReadSchema,
+  type PostAgentThreadMessage,
+  type MarkAgentThreadRead,
+} from "./agent-thread.js";
 
 export {
   createProjectSchema,
@@ -150,6 +166,27 @@ export {
   issueExecutionWorkspaceSettingsSchema,
   checkoutIssueSchema,
   addIssueCommentSchema,
+  issueThreadInteractionStatusSchema,
+  issueThreadInteractionKindSchema,
+  issueThreadInteractionContinuationPolicySchema,
+  suggestedTaskDraftSchema,
+  suggestTasksPayloadSchema,
+  suggestTasksResultCreatedTaskSchema,
+  suggestTasksResultSchema,
+  askUserQuestionsQuestionOptionSchema,
+  askUserQuestionsQuestionSchema,
+  askUserQuestionsPayloadSchema,
+  askUserQuestionsAnswerSchema,
+  askUserQuestionsResultSchema,
+  requestConfirmationIssueDocumentTargetSchema,
+  requestConfirmationCustomTargetSchema,
+  requestConfirmationTargetSchema,
+  requestConfirmationPayloadSchema,
+  requestConfirmationResultSchema,
+  createIssueThreadInteractionSchema,
+  acceptIssueThreadInteractionSchema,
+  rejectIssueThreadInteractionSchema,
+  respondIssueThreadInteractionSchema,
   linkIssueApprovalSchema,
   createIssueAttachmentMetadataSchema,
   issueDocumentFormatSchema,
@@ -163,6 +200,10 @@ export {
   type IssueExecutionWorkspaceSettings,
   type CheckoutIssue,
   type AddIssueComment,
+  type CreateIssueThreadInteraction,
+  type AcceptIssueThreadInteraction,
+  type RejectIssueThreadInteraction,
+  type RespondIssueThreadInteraction,
   type LinkIssueApproval,
   type CreateIssueAttachmentMetadata,
   type IssueDocumentFormat,
@@ -173,6 +214,10 @@ export {
 export {
   createIssueWorkProductSchema,
   updateIssueWorkProductSchema,
+  issueArtifactWorkProductMetadataSchema,
+  getStoredIssueArtifactWorkProductValidationIssues,
+  sanitizeStoredIssueArtifactWorkProductMetadata,
+  getIssueArtifactWorkProductValidationIssues,
   issueWorkProductTypeSchema,
   issueWorkProductStatusSchema,
   issueWorkProductReviewStateSchema,
@@ -337,3 +382,16 @@ export {
   type SetPluginState,
   type ListPluginState,
 } from "./plugin.js";
+
+export {
+  createBuilderSessionSchema,
+  sendBuilderMessageSchema,
+  updateBuilderProviderSettingsSchema,
+  applyBuilderProposalSchema,
+  rejectBuilderProposalSchema,
+  type CreateBuilderSession,
+  type SendBuilderMessage,
+  type UpdateBuilderProviderSettings,
+  type ApplyBuilderProposal,
+  type RejectBuilderProposal,
+} from "./builder.js";
