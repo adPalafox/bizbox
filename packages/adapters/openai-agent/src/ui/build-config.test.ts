@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_OPENAI_MODEL } from "../index.js";
 import { buildOpenAiAgentConfig } from "./build-config.js";
 
 describe("buildOpenAiAgentConfig", () => {
@@ -36,7 +37,7 @@ describe("buildOpenAiAgentConfig", () => {
 
     expect(config).toMatchObject({
       authToken: "sk-test",
-      model: "gpt-5",
+      model: DEFAULT_OPENAI_MODEL,
       workflowInstruction: "Review the issue and respond.",
       reasoningEffort: "medium",
       storeResponses: false,

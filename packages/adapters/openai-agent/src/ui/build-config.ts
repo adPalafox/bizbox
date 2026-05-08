@@ -1,6 +1,5 @@
 import type { CreateConfigValues } from "@paperclipai/adapter-utils";
-
-const DEFAULT_OPENAI_MODEL = "gpt-5";
+import { DEFAULT_OPENAI_MODEL } from "../index.js";
 
 export function buildOpenAiAgentConfig(v: CreateConfigValues): Record<string, unknown> {
   const adapterSchemaValues = v.adapterSchemaValues ?? {};
