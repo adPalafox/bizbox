@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   summarizeHeartbeatRunResultJson,
   buildHeartbeatRunIssueComment,
+  extractHeartbeatRunImportedIssueComments,
   mergeHeartbeatRunResultJson,
 } from "../services/heartbeat-run-summary.js";
 
@@ -94,5 +95,24 @@ describe("mergeHeartbeatRunResultJson", () => {
       summary: "adapter result",
       stdout: "raw stdout",
     });
+  });
+});
+
+describe("extractHeartbeatRunImportedIssueComments", () => {
+  it("returns normalized imported issue comment bodies", () => {
+    expect(
+      extractHeartbeatRunImportedIssueComments({
+        importedIssueComments: [
+          { body: " ClickUp reply from Risk Witherspoon:\n\nLooks risky. " },
+          { body: "" },
+          { nope: true },
+        ],
+      }),
+    ).toEqual(["ClickUp reply from Risk Witherspoon:\n\nLooks risky."]);
+  });
+
+  it("returns an empty list for missing or invalid payloads", () => {
+    expect(extractHeartbeatRunImportedIssueComments(null)).toEqual([]);
+    expect(extractHeartbeatRunImportedIssueComments({ importedIssueComments: "nope" })).toEqual([]);
   });
 });

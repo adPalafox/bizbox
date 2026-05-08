@@ -106,3 +106,21 @@ export function buildHeartbeatRunIssueComment(
     ?? null
   );
 }
+
+export function extractHeartbeatRunImportedIssueComments(
+  resultJson: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) {
+    return [];
+  }
+
+  const rawComments = resultJson.importedIssueComments;
+  if (!Array.isArray(rawComments)) return [];
+
+  return rawComments
+    .map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+      return readCommentText((entry as Record<string, unknown>).body);
+    })
+    .filter((body): body is string => body !== null);
+}

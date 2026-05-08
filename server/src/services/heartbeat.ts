@@ -48,6 +48,7 @@ import { secretService } from "./secrets.js";
 import { resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
 import {
   buildHeartbeatRunIssueComment,
+  extractHeartbeatRunImportedIssueComments,
   HEARTBEAT_RUN_RESULT_OUTPUT_MAX_CHARS,
   HEARTBEAT_RUN_RESULT_SUMMARY_MAX_CHARS,
   HEARTBEAT_RUN_SAFE_RESULT_JSON_MAX_BYTES,
@@ -1384,7 +1385,7 @@ export function mergeCoalescedContextSnapshot(
   return merged;
 }
 
-async function buildPaperclipWakePayload(input: {
+export async function buildPaperclipWakePayload(input: {
   db: Db;
   companyId: string;
   contextSnapshot: Record<string, unknown>;
@@ -1401,6 +1402,7 @@ async function buildPaperclipWakePayload(input: {
         id: string;
         identifier: string | null;
         title: string;
+        description?: string | null;
         status: string;
         priority: string;
       }
@@ -1418,6 +1420,7 @@ async function buildPaperclipWakePayload(input: {
             id: issues.id,
             identifier: issues.identifier,
             title: issues.title,
+            description: issues.description,
             status: issues.status,
             priority: issues.priority,
           })
@@ -1498,6 +1501,7 @@ async function buildPaperclipWakePayload(input: {
           id: issueSummary.id,
           identifier: issueSummary.identifier,
           title: issueSummary.title,
+          description: issueSummary.description ?? null,
           status: issueSummary.status,
           priority: issueSummary.priority,
         }
@@ -1647,6 +1651,12 @@ function getAdapterSessionCodec(adapterType: string) {
   return adapter.sessionCodec ?? defaultSessionCodec;
 }
 
+function adapterRequiresLiveExecutionPath(adapterType: string | null | undefined) {
+  if (!adapterType) return true;
+  if (adapterType === "clickup_agent_ref") return false;
+  return getServerAdapter(adapterType).requiresLiveExecutionPath !== false;
+}
+
 function normalizeSessionParams(params: Record<string, unknown> | null | undefined) {
   if (!params) return null;
   return Object.keys(params).length > 0 ? params : null;
@@ -1784,6 +1794,7 @@ export function heartbeatService(db: Db) {
         id: issues.id,
         identifier: issues.identifier,
         title: issues.title,
+        description: issues.description,
         status: issues.status,
         priority: issues.priority,
         projectId: issues.projectId,
@@ -3702,8 +3713,12 @@ export function heartbeatService(db: Db) {
 
   async function reconcileStrandedAssignedIssues() {
     const candidates = await db
-      .select()
+      .select({
+        issue: issues,
+        assigneeAdapterType: agents.adapterType,
+      })
       .from(issues)
+      .innerJoin(agents, eq(issues.assigneeAgentId, agents.id))
       .where(
         and(
           isNull(issues.assigneeUserId),
@@ -3720,9 +3735,15 @@ export function heartbeatService(db: Db) {
       issueIds: [] as string[],
     };
 
-    for (const issue of candidates) {
+    for (const candidate of candidates) {
+      const issue = candidate.issue;
       const agentId = issue.assigneeAgentId;
       if (!agentId) {
+        result.skipped += 1;
+        continue;
+      }
+
+      if (!adapterRequiresLiveExecutionPath(candidate.assigneeAdapterType)) {
         result.skipped += 1;
         continue;
       }
@@ -4081,6 +4102,7 @@ export function heartbeatService(db: Db) {
           id: issueContext.id,
           identifier: issueContext.identifier,
           title: issueContext.title,
+          description: issueContext.description,
           status: issueContext.status,
           priority: issueContext.priority,
           projectId: issueContext.projectId,
@@ -4112,6 +4134,7 @@ export function heartbeatService(db: Db) {
             id: issueRef.id,
             identifier: issueRef.identifier,
             title: issueRef.title,
+            description: issueRef.description,
             status: issueRef.status,
             priority: issueRef.priority,
           }
@@ -4833,6 +4856,10 @@ export function heartbeatService(db: Db) {
         await refreshContinuationSummaryForRun(livenessRun, agent);
         if (issueId && outcome === "succeeded") {
           try {
+            const importedIssueComments = extractHeartbeatRunImportedIssueComments(persistedResultJson);
+            for (const importedIssueComment of importedIssueComments) {
+              await issuesSvc.addComment(issueId, importedIssueComment, { agentId: agent.id });
+            }
             const existingRunComment = await findRunIssueComment(livenessRun.id, livenessRun.companyId, issueId);
             if (!existingRunComment) {
               const issueComment = buildHeartbeatRunIssueComment(persistedResultJson);

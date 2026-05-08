@@ -14,7 +14,11 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "lexical": ["./node_modules/lexical/index.d.ts"]
+      "lexical": ["./node_modules/lexical/index.d.ts"],
+      "@paperclipai/adapter-openai-agent": ["../packages/adapters/openai-agent/dist/index.d.ts"],
+      "@paperclipai/adapter-openai-agent/ui": ["../packages/adapters/openai-agent/dist/ui/index.d.ts"],
+      "@paperclipai/adapter-clickup-agent-ref": ["../packages/adapters/clickup-agent-ref/dist/index.d.ts"],
+      "@paperclipai/adapter-clickup-agent-ref/ui": ["../packages/adapters/clickup-agent-ref/dist/ui/index.d.ts"]
     }
   },
   "include": ["src", "storybook"]
