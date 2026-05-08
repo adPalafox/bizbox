@@ -143,12 +143,6 @@ describe("clickup_agent_ref execute", () => {
   it("appends a comment when a ClickUp task is already linked", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ comments: [] }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
         new Response(JSON.stringify({ id: "comment_123" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -168,6 +162,7 @@ describe("clickup_agent_ref execute", () => {
       ),
     );
 
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.clickup.com/api/v2/task/task_123/comment");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.clickup.com/api/v2/task/task_123");
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
