@@ -99,12 +99,25 @@ export function buildHeartbeatRunIssueComment(
     return null;
   }
 
-  return (
+  const primaryComment = (
     readCommentText(resultJson.summary)
     ?? readCommentText(resultJson.result)
     ?? readCommentText(resultJson.message)
     ?? null
   );
+  const importedComments = extractHeartbeatRunImportedIssueComments(resultJson);
+
+  if (primaryComment && importedComments.length === 0) {
+    return primaryComment;
+  }
+  if (!primaryComment && importedComments.length === 0) {
+    return null;
+  }
+  if (!primaryComment) {
+    return importedComments.join("\n\n");
+  }
+
+  return `${primaryComment}\n\n---\n\n${importedComments.join("\n\n")}`;
 }
 
 export function extractHeartbeatRunImportedIssueComments(
