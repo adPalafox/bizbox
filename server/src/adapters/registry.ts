@@ -68,9 +68,17 @@ import {
   testEnvironment as openAiAgentTestEnvironment,
 } from "@paperclipai/adapter-openai-agent/server";
 import {
+  agentConfigurationDoc as openAiAgentConfigurationDoc,
+  models as openAiAgentModels,
+} from "@paperclipai/adapter-openai-agent";
+import {
   execute as clickUpAgentRefExecute,
   testEnvironment as clickUpAgentRefTestEnvironment,
 } from "@paperclipai/adapter-clickup-agent-ref/server";
+import {
+  agentConfigurationDoc as clickUpAgentRefConfigurationDoc,
+  models as clickUpAgentRefModels,
+} from "@paperclipai/adapter-clickup-agent-ref";
 import { listCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
@@ -224,39 +232,6 @@ const ottoAgentAdapter: ServerAdapterModule = {
   agentConfigurationDoc: ottoAgentConfigurationDoc,
 };
 
-const openAiAgentModels = [
-  { id: "gpt-5", label: "GPT-5" },
-  { id: "gpt-5-mini", label: "GPT-5 Mini" },
-  { id: "gpt-4.1", label: "GPT-4.1" },
-  { id: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
-];
-
-const openAiAgentConfigurationDoc = `# openai_agent adapter configuration
-
-Adapter: openai_agent
-
-Use when:
-- You want Bizbox to execute work through OpenAI's API directly.
-- You want a normal Bizbox agent record whose heartbeat runs through the OpenAI Responses API.
-
-Don't use when:
-- You need local CLI execution with local files and shell tools.
-- You want to reference a ClickUp-side agent without direct LLM execution.
-
-Core fields:
-- authToken (string, required at runtime): OpenAI API key. You can also persist authTokenRef as a Bizbox secret reference.
-- model (string, optional): OpenAI model id. Default: gpt-5
-
-Optional fields:
-- apiBaseUrl (string, optional): override the OpenAI-compatible API base. Default: https://api.openai.com/v1
-- reasoningEffort (string, optional): low, medium, or high
-- workflowInstruction (string, optional): stable system instruction prepended to each run
-- studioUrl (string, optional): human reference link to a related ChatGPT Agent Studio page
-- storeResponses (boolean, optional): when true, include store=true in Responses API requests. Default: true
-- includeContextJson (boolean, optional): append structured Bizbox context JSON to the prompt
-- timeoutSec (number, optional): request timeout in seconds
-`;
-
 const openAiAgentAdapter: ServerAdapterModule = {
   type: "openai_agent",
   execute: openAiAgentExecute,
@@ -267,34 +242,6 @@ const openAiAgentAdapter: ServerAdapterModule = {
   requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: openAiAgentConfigurationDoc,
 };
-
-const clickUpAgentRefModels: { id: string; label: string }[] = [];
-
-const clickUpAgentRefConfigurationDoc = `# clickup_agent_ref adapter configuration
-
-Adapter: clickup_agent_ref
-
-Use when:
-- You want a Bizbox agent record to represent a ClickUp-side agent or automation owner.
-- You want Bizbox heartbeats to push work into ClickUp task surfaces rather than executing local code.
-
-Don't use when:
-- You expect Bizbox to directly invoke a public ClickUp AI agent execution API.
-- You want direct LLM execution through OpenAI.
-
-Core fields:
-- authToken (string, required at runtime): ClickUp OAuth or personal access token. You can also persist authTokenRef as a Bizbox secret reference.
-- workspaceId (string, required): ClickUp workspace id.
-- listId (string, required): ClickUp list id where Bizbox issues should be materialized as tasks.
-
-Optional fields:
-- apiBaseUrl (string, optional): API base URL override. Default: https://api.clickup.com/api/v2
-- clickupAgentName (string, optional): human label for the external ClickUp agent or automation owner
-- clickupAgentUrl (string, optional): deep link to the ClickUp agent/task/chat configuration
-- channelId (string, optional): stored for future chat routing
-- timeoutSec (number, optional): request timeout in seconds
-- includeContextJson (boolean, optional): append full Bizbox context JSON to the task description/comment
-`;
 
 const clickUpAgentRefAdapter: ServerAdapterModule = {
   type: "clickup_agent_ref",
