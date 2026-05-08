@@ -4562,6 +4562,12 @@ export function heartbeatService(db: Db) {
         continue;
       }
 
+      const adapter = getServerAdapter(agent.adapterType);
+      if (adapter.requiresLiveExecutionPath === false) {
+        result.skipped += 1;
+        continue;
+      }
+
       if (await hasActiveExecutionPath(issue.companyId, issue.id)) {
         result.skipped += 1;
         continue;
