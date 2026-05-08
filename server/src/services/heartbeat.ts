@@ -5211,7 +5211,7 @@ export function heartbeatService(db: Db) {
       })
     ) {
       try {
-        await issuesSvc.checkout(issueId, agent.id, ["todo", "backlog", "blocked"], run.id);
+        await issuesSvc.checkout(issueId, agent.id, ["todo", "backlog", "blocked", "awaiting_human"], run.id);
         context[BIZBOX_HARNESS_CHECKOUT_KEY] = true;
       } catch (error) {
         if (!isCheckoutConflictError(error)) throw error;

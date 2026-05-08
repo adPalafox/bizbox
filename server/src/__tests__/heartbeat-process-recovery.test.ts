@@ -621,6 +621,87 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     return { companyId, agentId, runId, wakeupRequestId, issueId };
   }
 
+  async function seedQueuedAwaitingHumanWakeFixture() {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const runId = randomUUID();
+    const wakeupRequestId = randomUUID();
+    const issueId = randomUUID();
+    const now = new Date("2026-03-19T00:00:00.000Z");
+    const issuePrefix = `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "idle",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {
+        heartbeat: {
+          wakeOnDemand: true,
+          maxConcurrentRuns: 1,
+        },
+      },
+      permissions: {},
+    });
+
+    await db.insert(agentWakeupRequests).values({
+      id: wakeupRequestId,
+      companyId,
+      agentId,
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_commented",
+      payload: { issueId },
+      status: "queued",
+      runId,
+      requestedAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "queued",
+      wakeupRequestId,
+      contextSnapshot: {
+        issueId,
+        taskId: issueId,
+        wakeReason: "issue_commented",
+      },
+      updatedAt: now,
+      createdAt: now,
+    });
+
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Resume after human response",
+      status: "awaiting_human",
+      priority: "medium",
+      assigneeAgentId: agentId,
+      assigneeUserId: null,
+      checkoutRunId: null,
+      executionRunId: null,
+      issueNumber: 1,
+      identifier: `${issuePrefix}-1`,
+    });
+
+    return { agentId, runId, issueId };
+  }
+
   it("keeps a local run active when the recorded pid is still alive", async () => {
     const child = spawnAliveProcess();
     childProcesses.add(child);
@@ -813,6 +894,23 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
 
     const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, issueId));
     expect(comments).toHaveLength(0);
+  });
+
+  it("auto-checks out awaiting_human issues on human action wakes", async () => {
+    const { agentId, runId, issueId } = await seedQueuedAwaitingHumanWakeFixture();
+    const heartbeat = heartbeatService(db);
+
+    await heartbeat.resumeQueuedRuns();
+    await waitForRunToSettle(heartbeat, runId);
+
+    const issue = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .then((rows) => rows[0] ?? null);
+
+    expect(issue?.assigneeAgentId).toBe(agentId);
+    expect(issue?.status).toBe("in_progress");
   });
 
   it("clears the detached warning when the run reports activity again", async () => {

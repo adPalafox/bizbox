@@ -3159,14 +3159,16 @@ export function issueRoutes(
     const interruptRequested = req.body.interrupt === true;
     const isClosed = isClosedIssueStatus(issue.status);
     const isBlocked = isParkedIssueStatus(issue.status);
+    const implicitMoveToTodoRequested = shouldImplicitlyMoveCommentedIssueToTodoForAgent({
+      issueStatus: issue.status,
+      assigneeAgentId: issue.assigneeAgentId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+    });
+    const suppressImplicitMoveForAgentAwaitingHuman = actor.actorType === "agent" && issue.status === "awaiting_human";
     const effectiveMoveToTodoRequested =
-      reopenRequested ||
-      shouldImplicitlyMoveCommentedIssueToTodoForAgent({
-        issueStatus: issue.status,
-        assigneeAgentId: issue.assigneeAgentId,
-        actorType: actor.actorType,
-        actorId: actor.actorId,
-      });
+      reopenRequested || (suppressImplicitMoveForAgentAwaitingHuman ? false : implicitMoveToTodoRequested);
+    const requestedStatusForCommentReopen = effectiveMoveToTodoRequested ? "todo" : null;
     const hasUnresolvedFirstClassBlockers =
       isBlocked && effectiveMoveToTodoRequested
         ? (await svc.getDependencyReadiness(issue.id)).unresolvedBlockerCount > 0
@@ -3178,6 +3180,7 @@ export function issueRoutes(
     const commentReferenceSummaryBefore = await issueReferencesSvc.listIssueReferenceSummary(issue.id);
 
     if (effectiveMoveToTodoRequested && (isClosed || (isBlocked && !hasUnresolvedFirstClassBlockers))) {
+      if (requestedStatusForCommentReopen && !assertAgentMayTransitionAwaitingHuman(req, res, issue, requestedStatusForCommentReopen)) return;
       const reopenedIssue = await svc.update(id, { status: "todo" });
       if (!reopenedIssue) {
         res.status(404).json({ error: "Issue not found" });
