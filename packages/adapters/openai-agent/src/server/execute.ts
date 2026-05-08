@@ -163,6 +163,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   });
   let response: Response;
   let rawText = "";
+  let retriedWithFreshSession = false;
   try {
     ({ response, rawText } = await sendRequest(ctx, config, prompt, previousResponseId));
   } catch (err) {
@@ -185,6 +186,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         "stderr",
         "[openai-agent] WARN: previous_response_id is no longer valid; retrying with a fresh session\n",
       );
+      retriedWithFreshSession = true;
       try {
         ({ response, rawText } = await sendRequest(ctx, config, prompt, null));
       } catch (err) {
@@ -214,6 +216,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       timedOut: false,
       errorMessage,
       errorCode: `HTTP_${response.status}`,
+      ...(retriedWithFreshSession ? { clearSession: true } : {}),
     };
   }
 

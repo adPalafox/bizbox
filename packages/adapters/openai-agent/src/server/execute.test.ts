@@ -86,4 +86,42 @@ describe("openai_agent execute", () => {
     expect(JSON.parse(String(init.body))).not.toHaveProperty("store");
     expect(result.exitCode).toBe(0);
   });
+
+  it("clears the stored session when stale-session retry still returns a non-ok response", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "The previous_response_id 'resp_old' was not found.",
+            },
+          }),
+          { status: 404, statusText: "Not Found", headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "upstream still failed",
+            },
+          }),
+          { status: 502, statusText: "Bad Gateway", headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    const result = await execute({
+      ...makeContext({ authToken: "sk-test", model: "gpt-5" }),
+      runtime: {
+        sessionId: null,
+        sessionParams: { previousResponseId: "resp_old" },
+        sessionDisplayId: null,
+        taskKey: "issue:123",
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.errorCode).toBe("HTTP_502");
+    expect(result.clearSession).toBe(true);
+  });
 });
