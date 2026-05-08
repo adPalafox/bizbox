@@ -759,6 +759,80 @@ describeEmbeddedPostgres("issueThreadInteractionService", () => {
     expect(updated?.status).toBe("awaiting_human");
   });
 
+  it("moves awaiting_human back to todo when a request_confirmation is rejected", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Recover parked issue after rejection",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parent issue",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    const created = await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "request_confirmation",
+      continuationPolicy: "wake_assignee",
+      payload: {
+        version: 1,
+        prompt: "Proceed?",
+      },
+    }, {
+      agentId,
+    });
+
+    const rejected = await interactionsSvc.rejectInteraction({
+      id: issueId,
+      companyId,
+    }, created.id, {
+      reason: "Need revisions before proceeding",
+    }, {
+      userId: "local-board",
+    });
+
+    expect(rejected.status).toBe("rejected");
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated).toMatchObject({
+      id: issueId,
+      status: "todo",
+      assigneeAgentId: agentId,
+    });
+  });
+
   it("does not auto-park when a board user creates an interaction", async () => {
     const companyId = randomUUID();
     const goalId = randomUUID();

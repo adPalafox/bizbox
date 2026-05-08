@@ -16,6 +16,7 @@ import {
   createIssueWorkProductSchema,
   createIssueLabelSchema,
   checkoutIssueSchema,
+  PARKED_ISSUE_STATUSES,
   createChildIssueSchema,
   createIssueSchema,
   feedbackTargetTypeSchema,
@@ -183,7 +184,7 @@ function isClosedIssueStatus(status: string | null | undefined): status is "done
 }
 
 function isParkedIssueStatus(status: string | null | undefined): status is "blocked" | "awaiting_human" {
-  return status === "blocked" || status === "awaiting_human";
+  return (PARKED_ISSUE_STATUSES as readonly string[]).includes(status ?? "");
 }
 
 function shouldImplicitlyMoveCommentedIssueToTodoForAgent(input: {

@@ -601,7 +601,31 @@ export function issueThreadInteractionService(db: Db) {
     if (!updated) {
       throw conflict("Interaction has already been resolved");
     }
-    await touchIssue(db, args.issue.id);
+
+    const issueContext = await db
+      .select({
+        id: issues.id,
+        companyId: issues.companyId,
+        status: issues.status,
+      })
+      .from(issues)
+      .where(eq(issues.id, args.issue.id))
+      .then((rows) => rows[0] ?? null);
+
+    if (!issueContext || issueContext.companyId !== args.issue.companyId) {
+      throw notFound("Issue not found");
+    }
+
+    if (issueContext.status === "awaiting_human") {
+      await issueService(db).update(args.issue.id, {
+        status: "todo",
+        actorAgentId: args.actor.agentId ?? null,
+        actorUserId: args.actor.userId ?? null,
+      });
+    } else {
+      await touchIssue(db, args.issue.id);
+    }
+
     return hydrateInteraction(updated);
   }
 
