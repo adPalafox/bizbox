@@ -261,12 +261,12 @@ export function Dashboard() {
                     <p className="mt-1 text-sm text-muted-foreground">The first screen should tell you what is active, blocked, and expensive.</p>
                   </div>
                   {(data.budgets.activeIncidents > 0 || data.tasks.blocked > 0) ? (
-                    <div className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-red-200">
+                    <div className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-red-600 dark:text-red-200">
                       <TriangleAlert className="h-3.5 w-3.5" />
                       Attention needed
                     </div>
                   ) : (
-                    <div className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
+                    <div className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-200">
                       Company healthy
                     </div>
                   )}
