@@ -77,7 +77,7 @@ export function BreadcrumbBar() {
 
   const globalToolbarSlots = <GlobalToolbarPlugins context={globalToolbarSlotContext} />;
   const companyIdentity = selectedCompany ? (
-    <div className="hidden min-w-0 items-center gap-2 rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1.5 xl:flex">
+    <div className="hidden min-w-0 items-center gap-2 rounded-full border border-border bg-muted/40 px-2.5 py-1.5 xl:flex">
       <CompanyPatternIcon
         companyName={selectedCompany.name}
         logoUrl={selectedCompany.logoUrl}
@@ -98,7 +98,7 @@ export function BreadcrumbBar() {
     <Button
       variant="ghost"
       size="sm"
-      className="rounded-full border border-white/8 bg-white/[0.04] px-3 text-muted-foreground hover:border-white/12 hover:bg-white/[0.06] hover:text-foreground"
+      className="rounded-full border border-border bg-muted/40 px-3 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
       onClick={openSearch}
     >
       <Search className="h-4 w-4" />

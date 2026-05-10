@@ -246,10 +246,10 @@ export function Dashboard() {
                     Open work queue
                     <ArrowRight className="h-4 w-4" />
                   </Link>
-                  <Link to="/agents/all" className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-muted-foreground transition hover:border-white/16 hover:text-foreground">
+                  <Link to="/agents/all" className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/40 px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground">
                     Inspect agents
                   </Link>
-                  <Link to="/approvals/pending" className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-muted-foreground transition hover:border-white/16 hover:text-foreground">
+                  <Link to="/approvals/pending" className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/40 px-4 py-2 text-sm font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground">
                     Board approvals
                   </Link>
                 </div>
@@ -281,7 +281,7 @@ export function Dashboard() {
                           ? "border-primary/20 bg-primary/[0.12]"
                           : item.tone === "warning"
                             ? "border-amber-400/18 bg-amber-400/[0.08]"
-                            : "border-white/8 bg-white/[0.03]",
+                            : "border-border bg-muted/30",
                       )}
                     >
                       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{item.label}</div>
