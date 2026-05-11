@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+  activityLog,
   agents,
   companies,
   createDb,
@@ -39,6 +41,7 @@ describeEmbeddedPostgres("issueThreadInteractionService", () => {
   }, 20_000);
 
   afterEach(async () => {
+    await db.delete(activityLog);
     await db.delete(issueThreadInteractions);
     await db.delete(issueDocuments);
     await db.delete(documentRevisions);
@@ -427,6 +430,107 @@ describeEmbeddedPostgres("issueThreadInteractionService", () => {
     })).rejects.toThrow("Interaction has already been resolved");
   });
 
+  it("moves awaiting_human back to todo when ask_user_questions is answered", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Recover parked issue after answering questions",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parent issue",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    const created = await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "ask_user_questions",
+      continuationPolicy: "none",
+      payload: {
+        version: 1,
+        questions: [
+          {
+            id: "scope",
+            prompt: "Pick a path",
+            selectionMode: "single",
+            required: true,
+            options: [
+              { id: "a", label: "Path A" },
+              { id: "b", label: "Path B" },
+            ],
+          },
+        ],
+      },
+    }, {
+      agentId,
+    });
+
+    const parkedIssue = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(parkedIssue?.status).toBe("awaiting_human");
+    const initialHandoffs = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.awaiting_human.entered"));
+    expect(initialHandoffs).toHaveLength(1);
+
+    const answered = await interactionsSvc.answerQuestions({
+      id: issueId,
+      companyId,
+    }, created.id, {
+      answers: [
+        { questionId: "scope", optionIds: ["a"] },
+      ],
+    }, {
+      userId: "local-board",
+    });
+
+    expect(answered.status).toBe("answered");
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated).toMatchObject({
+      id: issueId,
+      status: "todo",
+      assigneeAgentId: agentId,
+    });
+
+    const handoffsAfterAnswer = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.awaiting_human.entered"));
+    expect(handoffsAfterAnswer).toHaveLength(1);
+  });
+
   it("reuses the existing interaction when the same idempotency key is submitted twice", async () => {
     const companyId = randomUUID();
     const goalId = randomUUID();
@@ -515,6 +619,12 @@ describeEmbeddedPostgres("issueThreadInteractionService", () => {
     const rows = await db.select().from(issueThreadInteractions);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.idempotencyKey).toBe("run-1:questionnaire");
+
+    const handoffs = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.awaiting_human.entered"));
+    expect(handoffs).toHaveLength(1);
   });
 
   it("accepts request_confirmation interactions without creating child issues", async () => {
@@ -687,6 +797,377 @@ describeEmbeddedPostgres("issueThreadInteractionService", () => {
       assigneeAgentId: agentId,
       assigneeUserId: null,
     });
+  });
+
+  it("auto-parks an in_progress issue to awaiting_human when an agent creates an ask_user_questions interaction", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Auto-park parent",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parent issue",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "ask_user_questions",
+      continuationPolicy: "wake_assignee",
+      payload: {
+        version: 1,
+        questions: [
+          {
+            id: "scope",
+            prompt: "Pick a path",
+            selectionMode: "single",
+            required: true,
+            options: [
+              { id: "a", label: "Path A" },
+              { id: "b", label: "Path B" },
+            ],
+          },
+        ],
+      },
+    }, {
+      agentId,
+    });
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated?.status).toBe("awaiting_human");
+
+    const handoff = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.awaiting_human.entered"))
+      .then((rows) => rows[0] ?? null);
+    expect(handoff?.details).toMatchObject({
+      issueId,
+      issuePath: expect.stringContaining("/issues/"),
+      handoffKind: "ask_user_questions",
+      needsHumanInput: "Need answers to 1 question(s).",
+      notification: expect.objectContaining({
+        link: expect.stringContaining("/issues/"),
+      }),
+    });
+  });
+
+  it("auto-parks an in_progress issue to awaiting_human when an agent creates a request_confirmation interaction", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Auto-park confirmation parent",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Reply draft approval",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "request_confirmation",
+      continuationPolicy: "wake_assignee",
+      payload: {
+        version: 1,
+        prompt: "Need approval on the exact reply draft before posting.",
+      },
+    }, {
+      agentId,
+    });
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated?.status).toBe("awaiting_human");
+
+    const handoff = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.awaiting_human.entered"))
+      .then((rows) => rows[0] ?? null);
+    expect(handoff?.details).toMatchObject({
+      issueId,
+      handoffKind: "request_confirmation",
+      needsHumanInput: "Need approval on the exact reply draft before posting.",
+      notification: expect.objectContaining({
+        summary: "Need approval on the exact reply draft before posting.",
+      }),
+    });
+  });
+
+  it("moves awaiting_human back to todo when a request_confirmation is rejected", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Recover parked issue after rejection",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parent issue",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    const created = await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "request_confirmation",
+      continuationPolicy: "wake_assignee",
+      payload: {
+        version: 1,
+        prompt: "Proceed?",
+      },
+    }, {
+      agentId,
+    });
+
+    const rejected = await interactionsSvc.rejectInteraction({
+      id: issueId,
+      companyId,
+    }, created.id, {
+      reason: "Need revisions before proceeding",
+    }, {
+      userId: "local-board",
+    });
+
+    expect(rejected.status).toBe("rejected");
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated).toMatchObject({
+      id: issueId,
+      status: "todo",
+      assigneeAgentId: agentId,
+    });
+
+    const handoffs = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.awaiting_human.entered"));
+    expect(handoffs).toHaveLength(1);
+  });
+
+  it("does not auto-park when a board user creates an interaction", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Board-asked question",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parent issue",
+      status: "in_progress",
+      priority: "medium",
+    });
+
+    await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "ask_user_questions",
+      continuationPolicy: "wake_assignee",
+      payload: {
+        version: 1,
+        questions: [
+          {
+            id: "q",
+            prompt: "Pick one",
+            selectionMode: "single",
+            required: true,
+            options: [
+              { id: "a", label: "A" },
+              { id: "b", label: "B" },
+            ],
+          },
+        ],
+      },
+    }, {
+      userId: "local-board",
+    });
+
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated?.status).toBe("in_progress");
+
+    const handoffs = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.awaiting_human.entered"));
+    expect(handoffs).toHaveLength(0);
+  });
+
+  it("preserves awaiting_human when accepting a confirmation that returns to the creator agent", async () => {
+    const companyId = randomUUID();
+    const goalId = randomUUID();
+    const issueId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await instanceSettingsService(db).updateExperimental({ enableIsolatedWorkspaces: false });
+    await db.insert(goals).values({
+      id: goalId,
+      companyId,
+      title: "Awaiting human flow",
+      level: "task",
+      status: "active",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Engineer",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      goalId,
+      title: "Parked issue",
+      status: "awaiting_human",
+      priority: "medium",
+      assigneeUserId: "local-board",
+    });
+
+    const created = await interactionsSvc.create({
+      id: issueId,
+      companyId,
+    }, {
+      kind: "request_confirmation",
+      continuationPolicy: "wake_assignee_on_accept",
+      payload: {
+        version: 1,
+        prompt: "Approve?",
+      },
+    }, {
+      agentId,
+    });
+
+    const accepted = await interactionsSvc.acceptInteraction({
+      id: issueId,
+      companyId,
+      goalId,
+      projectId: null,
+    }, created.id, {}, {
+      userId: "local-board",
+    });
+
+    expect(accepted.continuationIssue?.status).toBe("awaiting_human");
+    const updated = (await db.select().from(issues)).find((row) => row.id === issueId);
+    expect(updated?.status).toBe("awaiting_human");
+    expect(updated?.assigneeAgentId).toBe(agentId);
   });
 
   it("expires supersedable request confirmations when a user comments", async () => {

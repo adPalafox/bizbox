@@ -73,6 +73,7 @@ import {
   type IssueLivenessFinding,
 } from "./issue-liveness.js";
 import { logActivity, publishPluginDomainEvent, type LogActivityInput } from "./activity-log.js";
+import { maybeLogAwaitingHumanHandoff } from "./awaiting-human-handoff.js";
 import {
   buildWorkspaceReadyComment,
   cleanupExecutionWorkspaceArtifacts,
@@ -88,6 +89,7 @@ import { issueService } from "./issues.js";
 import { agentThreadService } from "./agent-threads.js";
 import { clickupBridgeService } from "./clickup-bridge.js";
 import { workProductService } from "./work-products.js";
+import { recordRunStatus } from "../otel.js";
 import {
   getIssueContinuationSummaryDocument,
   refreshIssueContinuationSummary,
@@ -153,6 +155,8 @@ const EXECUTION_PATH_HEARTBEAT_RUN_STATUSES = ["queued", "running", "scheduled_r
 const CANCELLABLE_HEARTBEAT_RUN_STATUSES = ["queued", "running", "scheduled_retry"] as const;
 const HEARTBEAT_RUN_TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"] as const;
 const UNSUCCESSFUL_HEARTBEAT_RUN_TERMINAL_STATUSES = ["failed", "cancelled", "timed_out"] as const;
+type HeartbeatRunTerminalStatus = (typeof HEARTBEAT_RUN_TERMINAL_STATUSES)[number];
+const HEARTBEAT_RUN_TERMINAL_STATUS_SET = new Set<string>(HEARTBEAT_RUN_TERMINAL_STATUSES);
 export const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_DELAYS_MS = [
   2 * 60 * 1000,
   10 * 60 * 1000,
@@ -1327,6 +1331,13 @@ function describeSessionResetReason(
   return null;
 }
 
+const HUMAN_ACTION_WAKE_REASONS_FOR_AUTO_CHECKOUT = new Set([
+  "issue_commented",
+  "issue_reopened_via_comment",
+  "interaction_resolved",
+  "approval_approved",
+]);
+
 function shouldAutoCheckoutIssueForWake(input: {
   contextSnapshot: Record<string, unknown> | null | undefined;
   issueStatus: string | null;
@@ -1342,6 +1353,7 @@ function shouldAutoCheckoutIssueForWake(input: {
     issueStatus !== "todo" &&
     issueStatus !== "backlog" &&
     issueStatus !== "blocked" &&
+    issueStatus !== "awaiting_human" &&
     issueStatus !== "in_progress"
   ) {
     return false;
@@ -1351,6 +1363,15 @@ function shouldAutoCheckoutIssueForWake(input: {
   if (!wakeReason) return false;
   if (wakeReason === "issue_comment_mentioned") return false;
   if (wakeReason.startsWith("execution_")) return false;
+
+  // For human-blocked issues, only re-engage the assignee on wakes that
+  // indicate the human/board has actually acted (e.g. comment, reopen,
+  // interaction resolution, approval). Generic execution-recovery wakes
+  // must not auto-checkout an `awaiting_human` issue, otherwise the AI
+  // would silently start working on something parked for a human.
+  if (issueStatus === "awaiting_human" && !HUMAN_ACTION_WAKE_REASONS_FOR_AUTO_CHECKOUT.has(wakeReason)) {
+    return false;
+  }
 
   return true;
 }
@@ -2632,12 +2653,41 @@ export function heartbeatService(db: Db) {
     status: string,
     patch?: Partial<typeof heartbeatRuns.$inferInsert>,
   ) {
-    const updated = await db
-      .update(heartbeatRuns)
-      .set({ status, ...patch, updatedAt: new Date() })
-      .where(eq(heartbeatRuns.id, runId))
-      .returning()
-      .then((rows) => rows[0] ?? null);
+    const transition = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select ${heartbeatRuns.id} from ${heartbeatRuns} where ${heartbeatRuns.id} = ${runId} for update`,
+      );
+
+      const previous = await tx
+        .select({ status: heartbeatRuns.status })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, runId))
+        .then((rows) => rows[0] ?? null);
+      if (!previous) {
+        return { updated: null as typeof heartbeatRuns.$inferSelect | null, shouldEmitTerminalMetric: false };
+      }
+
+      const updated = await tx
+        .update(heartbeatRuns)
+        .set({ status, ...patch, updatedAt: new Date() })
+        .where(eq(heartbeatRuns.id, runId))
+        .returning()
+        .then((rows) => rows[0] ?? null);
+
+      if (!updated) {
+        return { updated: null as typeof heartbeatRuns.$inferSelect | null, shouldEmitTerminalMetric: false };
+      }
+
+      const wasTerminal = HEARTBEAT_RUN_TERMINAL_STATUS_SET.has(previous.status as HeartbeatRunTerminalStatus);
+      const nowTerminal = HEARTBEAT_RUN_TERMINAL_STATUS_SET.has(updated.status as HeartbeatRunTerminalStatus);
+
+      return {
+        updated,
+        shouldEmitTerminalMetric: !wasTerminal && nowTerminal,
+      };
+    });
+
+    const updated = transition.updated;
 
     if (updated) {
       publishLiveEvent({
@@ -2656,6 +2706,16 @@ export function heartbeatService(db: Db) {
         },
       });
       publishRunLifecyclePluginEvent(updated);
+
+      if (transition.shouldEmitTerminalMetric) {
+        recordRunStatus({
+          company_id: updated.companyId,
+          agent_id: updated.agentId,
+          status: updated.status,
+          invocation_source: updated.invocationSource,
+          trigger_detail: updated.triggerDetail ?? undefined,
+        });
+      }
     }
 
     return updated;
@@ -4536,6 +4596,7 @@ export function heartbeatService(db: Db) {
       dispatchRequeued: 0,
       continuationRequeued: 0,
       orphanBlockersAssigned: 0,
+      awaitingHumanParked: 0,
       escalated: 0,
       skippedRoutineExecutions: 0,
       skipped: 0,
@@ -4574,6 +4635,52 @@ export function heartbeatService(db: Db) {
       if (await hasActiveExecutionPath(issue.companyId, issue.id)) {
         result.skipped += 1;
         continue;
+      }
+
+      if (issue.status === "todo") {
+        const relations = await issuesSvc.getRelationSummaries(issue.id);
+        const hasHumanOwnedOpenBlocker = relations.blockedBy.some((blocker) =>
+          blocker.status !== "done"
+          && blocker.status !== "cancelled"
+          && typeof blocker.assigneeUserId === "string"
+          && blocker.assigneeUserId.length > 0,
+        );
+        if (hasHumanOwnedOpenBlocker) {
+          const updated = await issuesSvc.update(issue.id, {
+            status: "awaiting_human",
+          });
+          if (updated) {
+            result.awaitingHumanParked += 1;
+            result.issueIds.push(issue.id);
+            await maybeLogAwaitingHumanHandoff(db, {
+              previousIssue: issue,
+              updatedIssue: updated,
+              source: "heartbeat.reconcile_human_blocked_todo_issue",
+              handoffKind: "human_owned_blocker",
+              blockers: relations.blockedBy
+                .filter((blocker) =>
+                  blocker.status !== "done"
+                  && blocker.status !== "cancelled"
+                  && typeof blocker.assigneeUserId === "string"
+                  && blocker.assigneeUserId.length > 0,
+                )
+                .map((blocker) => ({
+                  id: blocker.id,
+                  identifier: blocker.identifier ?? null,
+                  title: blocker.title,
+                  assigneeUserId: blocker.assigneeUserId ?? null,
+                })),
+              actor: {
+                actorType: "system",
+                actorId: "system",
+              },
+              emitIssueUpdatedActivity: true,
+            });
+          } else {
+            result.skipped += 1;
+          }
+          continue;
+        }
       }
 
       const latestRun = await getLatestIssueRun(issue.companyId, issue.id);
@@ -5207,7 +5314,7 @@ export function heartbeatService(db: Db) {
       })
     ) {
       try {
-        await issuesSvc.checkout(issueId, agent.id, ["todo", "backlog", "blocked"], run.id);
+        await issuesSvc.checkout(issueId, agent.id, ["todo", "backlog", "blocked", "awaiting_human"], run.id);
         context[BIZBOX_HARNESS_CHECKOUT_KEY] = true;
       } catch (error) {
         if (!isCheckoutConflictError(error)) throw error;
