@@ -232,7 +232,7 @@ export function clickupBridgeService(db: Db) {
   return {
     async closeActiveBridges(reason: string, companyId?: string) {
       const filters = [
-        or(eq(clickupBridges.status, "waiting_for_agent_reply"), eq(clickupBridges.status, "agent_replied")),
+        eq(clickupBridges.status, "waiting_for_agent_reply"),
         ...(companyId ? [eq(clickupBridges.companyId, companyId)] : []),
       ];
       return db
@@ -274,6 +274,7 @@ export function clickupBridgeService(db: Db) {
           target: [clickupBridges.companyId, clickupBridges.sourceType, clickupBridges.sourceId, clickupBridges.clickupListId],
           set: { updatedAt: now, lastError: null },
         })
+        // Postgres RETURNING yields post-upsert row, including existing status.
         .returning();
 
       let bridge = upsertedBridge!;
@@ -401,6 +402,17 @@ export function clickupBridgeService(db: Db) {
             if (!res.ok) throw new Error(`clickup create task failed: ${res.status}`);
             const createdTask = parseCreatedTaskResponse(res.text);
             const taskId = createdTask.taskId;
+            await db.update(clickupBridges).set({
+              clickupTaskId: taskId,
+              clickupTaskUrl: createdTask.taskUrl,
+              lastError: null,
+              updatedAt: new Date(),
+            }).where(eq(clickupBridges.id, bridge.id));
+            bridge = {
+              ...bridge,
+              clickupTaskId: taskId,
+              clickupTaskUrl: createdTask.taskUrl,
+            };
 
             const firstComment = await clickupRequest(
               `${cfg.apiBaseUrl}/task/${taskId}/comment`,

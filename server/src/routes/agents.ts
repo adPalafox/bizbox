@@ -172,6 +172,7 @@ export function agentRoutes(db: Db) {
       .where(
         and(
           eq(clickupBridges.companyId, input.companyId),
+          eq(heartbeatRuns.companyId, input.companyId),
           inArray(clickupBridges.status, [...CLICKUP_ACTIVE_BRIDGE_STATUSES]),
           ...(input.issueId
             ? [eq(clickupBridges.sourceType, "issue"), eq(clickupBridges.sourceId, input.issueId)]

@@ -7556,7 +7556,7 @@ export function heartbeatService(db: Db) {
       .where(
         and(
           eq(clickupBridges.id, clickupBridgeId),
-          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
         ),
       );
   }

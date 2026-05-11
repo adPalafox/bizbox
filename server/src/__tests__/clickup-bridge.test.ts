@@ -923,7 +923,7 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
       taskKey: "agent-thread:one",
       clickupListId: "list-1",
       clickupTaskId: "task-1",
-      status: "agent_replied",
+      status: "waiting_for_agent_reply",
       nextPollAt: new Date(),
     }).returning();
 
@@ -1238,6 +1238,96 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
       clickupTaskId: null,
       lastError: expect.stringContaining("clickup create task response parse failed:"),
     }));
+  });
+
+  it("persists created task id before retrying failed first comment delivery", async () => {
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body && typeof init.body === "string"
+        ? JSON.parse(init.body)
+        : {};
+      requests.push({ url, body });
+      if (url.endsWith("/list/list-1/task")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ id: "task-1", url: "https://app.clickup.com/t/task-1" }),
+        };
+      }
+      if (url.endsWith("/task/task-1/comment")) {
+        return {
+          ok: false,
+          status: 503,
+          text: async () => "temporary failure",
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const svc = clickupBridgeService(db);
+    await svc.enqueueFromWake({
+      companyId,
+      agentId,
+      context: {
+        paperclipWake: {
+          issue: {
+            id: issueId,
+            identifier: "TES-17",
+            title: "Keep created task id on first comment retry",
+          },
+        },
+      },
+      config: { listId: "list-1", authToken: "token-1", bridgeBotUserId: "bridge-bot-1" },
+    });
+
+    await svc.processOutbound();
+
+    const [event] = await db.select().from(clickupOutboundEvents);
+    const [bridge] = await db.select().from(clickupBridges);
+    expect(event).toEqual(expect.objectContaining({
+      status: "pending",
+      attempts: 1,
+      lastError: "clickup first comment failed: 503",
+    }));
+    expect(bridge).toEqual(expect.objectContaining({
+      clickupTaskId: "task-1",
+      clickupTaskUrl: "https://app.clickup.com/t/task-1",
+      status: "pending_clickup_task",
+      lastError: "clickup first comment failed: 503",
+    }));
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://api.clickup.com/api/v2/list/list-1/task",
+      "https://api.clickup.com/api/v2/task/task-1/comment",
+    ]);
   });
 
   it("requeues transient outbound failures as pending with a retry timestamp", async () => {
