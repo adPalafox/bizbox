@@ -227,9 +227,6 @@ async function syncTaskDetails(
   body: string,
 ): Promise<void> {
   const taskFields = buildTaskFields(body, config);
-  if (Object.keys(taskFields).length === 0) {
-    return;
-  }
   await ctx.onLog(
     "stdout",
     `[clickup-agent-ref] sync task details to task=${taskId} status=${config.automationStatus ?? "unchanged"} tags=${config.automationTags.join(",") || "unchanged"}\n`,
