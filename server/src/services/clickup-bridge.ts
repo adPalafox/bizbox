@@ -132,6 +132,18 @@ function parseCreatedTaskResponse(rawText: string): { taskId: string; taskUrl: s
   }
 }
 
+function parseCommentCollection(rawText: string, errorPrefix: string): unknown[] {
+  try {
+    const payload = parseObject(JSON.parse(rawText));
+    if (Array.isArray(payload.comments)) return payload.comments;
+    if (Array.isArray(payload.replies)) return payload.replies;
+    return [];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${errorPrefix}: ${message}`);
+  }
+}
+
 function buildTaskName(context: Record<string, unknown>, taskKey: string): string {
   const issue = parseObject(context.issue);
   const wake = parseObject(context.paperclipWake);
@@ -467,8 +479,12 @@ export function clickupBridgeService(db: Db) {
           const res = await clickupRequest(`${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}/comment`, { method: "GET", headers }, cfg.timeoutSec);
           if (!res.ok) throw new Error(`clickup poll failed: ${res.status}`);
 
-          const payload = parseObject(JSON.parse(res.text));
-          const comments = Array.isArray(payload.comments) ? payload.comments : [];
+          let comments: unknown[] = [];
+          try {
+            comments = parseCommentCollection(res.text, "clickup task comments parse failed");
+          } catch {
+            comments = [];
+          }
           const imported = new Set(Array.isArray(bridge.importedCommentIds) ? bridge.importedCommentIds : []);
 
           const replyRows: unknown[] = [];
@@ -482,13 +498,12 @@ export function clickupBridgeService(db: Db) {
             if (!topId) continue;
             const replyRes = await clickupRequest(`${cfg.apiBaseUrl}/comment/${topId}/reply`, { method: "GET", headers }, cfg.timeoutSec);
             if (!replyRes.ok) continue;
-            const replyPayload = parseObject(JSON.parse(replyRes.text));
-            const rows = Array.isArray(replyPayload.comments)
-              ? replyPayload.comments
-              : Array.isArray(replyPayload.replies)
-                ? replyPayload.replies
-                : [];
-            replyRows.push(...rows);
+            try {
+              const rows = parseCommentCollection(replyRes.text, `clickup reply comments parse failed for ${topId}`);
+              replyRows.push(...rows);
+            } catch {
+              continue;
+            }
           }
 
           const candidatesById = new Map<string, { id: string; text: string; createdAt: number }>();

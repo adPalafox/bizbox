@@ -414,6 +414,174 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(events.map((event) => event.details?.clickupCommentId)).toEqual(["clickup-comment-1", "clickup-comment-2"]);
   });
 
+  it("skips malformed task comment payloads without failing the bridge poll", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/task/task-1/comment")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => "<html>bad task comments payload</html>",
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      issueNumber: 16,
+      identifier: "TES-16",
+      title: "Ignore malformed task comments",
+      status: "todo",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: issueId,
+      taskKey: "issue:TES-16",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date(Date.now() - 60_000),
+    });
+
+    await clickupBridgeService(db).pollInbound();
+
+    const comments = await db.select().from(issueComments);
+    const [bridge] = await db.select().from(clickupBridges);
+    expect(comments).toHaveLength(0);
+    expect(bridge).toEqual(expect.objectContaining({
+      status: "waiting_for_agent_reply",
+      consecutivePollFailures: 0,
+      lastError: null,
+    }));
+  });
+
+  it("skips malformed reply payloads without failing the bridge poll", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/task/task-1/comment")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            comments: [
+              {
+                id: "clickup-comment-1",
+                comment_text: "Imported from ClickUp",
+                user: { id: 101 },
+                date: 1710000000000,
+                reply_count: 1,
+              },
+            ],
+          }),
+        };
+      }
+      if (url.endsWith("/comment/clickup-comment-1/reply")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => "<html>bad reply payload</html>",
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      issueNumber: 16,
+      identifier: "TES-16",
+      title: "Ignore malformed replies",
+      status: "todo",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: issueId,
+      taskKey: "issue:TES-16",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date(Date.now() - 60_000),
+    });
+
+    await clickupBridgeService(db).pollInbound();
+
+    const comments = await db.select().from(issueComments);
+    const [bridge] = await db.select().from(clickupBridges);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.body).toBe("Imported from ClickUp");
+    expect(bridge).toEqual(expect.objectContaining({
+      status: "agent_replied",
+      consecutivePollFailures: 0,
+      lastError: null,
+    }));
+  });
+
   it("imports ClickUp replies into active agent threads", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();
