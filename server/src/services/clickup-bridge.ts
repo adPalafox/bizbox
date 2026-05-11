@@ -14,6 +14,7 @@ const MAX_OUTBOUND_ATTEMPTS = 5;
 const MAX_POLL_FAILURES = 10;
 const MAX_IMPORTED_IDS = 1000;
 const MIN_POLL_CLAIM_MS = 45_000;
+const STALE_OUTBOUND_PROCESSING_MS = 2 * 60 * 1000;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -284,6 +285,19 @@ export function clickupBridgeService(db: Db) {
 
     async processOutbound(limit = 20) {
       const now = new Date();
+      await db
+        .update(clickupOutboundEvents)
+        .set({
+          status: "pending",
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(clickupOutboundEvents.status, "processing"),
+            lt(clickupOutboundEvents.updatedAt, new Date(now.getTime() - STALE_OUTBOUND_PROCESSING_MS)),
+          ),
+        );
+
       const events = await db
         .select()
         .from(clickupOutboundEvents)
@@ -353,13 +367,6 @@ export function clickupBridgeService(db: Db) {
             );
             if (!post.ok) throw new Error(`clickup append comment failed: ${post.status}`);
             const postedCommentId = extractCommentIdFromCreateResponse(post.text);
-            if (bridge.mode === "automation_trigger" && cfg.statusToTriggerAgent) {
-              await clickupRequest(
-                `${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}`,
-                { method: "PUT", headers, body: JSON.stringify({ status: cfg.statusToTriggerAgent }) },
-                cfg.timeoutSec,
-              );
-            }
             await db.update(clickupBridges).set({
               status: "waiting_for_agent_reply",
               importedCommentIds: postedCommentId ? appendImportedId(bridge.importedCommentIds, postedCommentId) : bridge.importedCommentIds,
@@ -368,6 +375,17 @@ export function clickupBridgeService(db: Db) {
               lastError: null,
               updatedAt: new Date(),
             }).where(eq(clickupBridges.id, bridge.id));
+            if (bridge.mode === "automation_trigger" && cfg.statusToTriggerAgent) {
+              try {
+                await clickupRequest(
+                  `${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}`,
+                  { method: "PUT", headers, body: JSON.stringify({ status: cfg.statusToTriggerAgent }) },
+                  cfg.timeoutSec,
+                );
+              } catch {
+                // Best-effort automation trigger. Comment already persisted above.
+              }
+            }
           }
 
           await db.update(clickupOutboundEvents).set({
