@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   DollarSign,
   History,
-  Search,
   SquarePen,
   Network,
   Boxes,
@@ -48,12 +47,6 @@ export function Sidebar() {
   const showWorkspacesLink =
     experimentalSettings?.enableIsolatedWorkspaces === true;
   const showBuilderLink = experimentalSettings?.builderEnabled === true;
-
-  function openSearch() {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "k", metaKey: true }),
-    );
-  }
 
   const pluginContext = {
     companyId: selectedCompanyId,
