@@ -151,36 +151,47 @@ export function BreadcrumbBar() {
     </div>
   );
 
+  const showBreadcrumbs = !(
+    breadcrumbs.length === 1 &&
+    TOP_LEVEL_BREADCRUMB_LABELS.has(breadcrumbs[0]?.label ?? "")
+  );
+
   return (
     <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
       {menuButton}
       {nav}
-      <span className="hidden select-none text-muted-foreground lg:inline">|</span>
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <Breadcrumb className="min-w-0 overflow-hidden">
-          <BreadcrumbList className="flex-nowrap">
-            {breadcrumbs.map((crumb, i) => {
-              const isLast = i === breadcrumbs.length - 1;
-              return (
-                <Fragment key={i}>
-                  {i > 0 && <BreadcrumbSeparator />}
-                  <BreadcrumbItem className={isLast ? "min-w-0" : "shrink-0"}>
-                    {isLast || !crumb.href ? (
-                      <BreadcrumbPage className="truncate">
-                        {crumb.label}
-                      </BreadcrumbPage>
-                    ) : (
-                      <BreadcrumbLink asChild>
-                        <Link to={crumb.href}>{crumb.label}</Link>
-                      </BreadcrumbLink>
-                    )}
-                  </BreadcrumbItem>
-                </Fragment>
-              );
-            })}
-          </BreadcrumbList>
-        </Breadcrumb>
-      </div>
+      {showBreadcrumbs ? (
+        <>
+          <span className="hidden select-none text-muted-foreground lg:inline">|</span>
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <Breadcrumb className="min-w-0 overflow-hidden">
+              <BreadcrumbList className="flex-nowrap">
+                {breadcrumbs.map((crumb, i) => {
+                  const isLast = i === breadcrumbs.length - 1;
+                  return (
+                    <Fragment key={i}>
+                      {i > 0 && <BreadcrumbSeparator />}
+                      <BreadcrumbItem className={isLast ? "min-w-0" : "shrink-0"}>
+                        {isLast || !crumb.href ? (
+                          <BreadcrumbPage className="truncate">
+                            {crumb.label}
+                          </BreadcrumbPage>
+                        ) : (
+                          <BreadcrumbLink asChild>
+                            <Link to={crumb.href}>{crumb.label}</Link>
+                          </BreadcrumbLink>
+                        )}
+                      </BreadcrumbItem>
+                    </Fragment>
+                  );
+                })}
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        </>
+      ) : (
+        <div className="min-w-0 flex-1" />
+      )}
       {shellRight}
     </div>
   );

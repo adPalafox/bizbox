@@ -250,7 +250,7 @@ export function CompanyRail() {
           <TooltipTrigger asChild>
             <button
               onClick={() => openOnboarding()}
-              className="flex h-11 w-11 items-center justify-center rounded-[18px] border border-dashed border-border/80 bg-white/[0.03] text-muted-foreground transition-[border-color,color,transform] duration-150 hover:-translate-y-0.5 hover:border-primary/40 hover:text-primary"
+              className="flex h-11 w-11 items-center justify-center rounded-[18px] border border-dashed border-border/80 bg-muted/30 text-muted-foreground transition-[border-color,color,transform] duration-150 hover:-translate-y-0.5 hover:border-primary/40 hover:text-primary"
               aria-label="Add company"
             >
               <Plus className="h-5 w-5" />
