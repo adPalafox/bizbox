@@ -1,6 +1,14 @@
 import { Fragment, useMemo } from "react";
 import { Link } from "@/lib/router";
-import { BellRing, CircleDot, LayoutDashboard, Menu, Search, ShieldCheck, Users } from "lucide-react";
+import {
+  BellRing,
+  CircleDot,
+  LayoutDashboard,
+  Menu,
+  Search,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useSidebar } from "../context/SidebarContext";
 import { useCompany } from "../context/CompanyContext";
@@ -15,11 +23,12 @@ import {
 } from "@/components/ui/breadcrumb";
 import { PluginSlotOutlet, usePluginSlots } from "@/plugins/slots";
 import { PluginLauncherOutlet, usePluginLaunchers } from "@/plugins/launchers";
-import { BizboxBrandMark } from "./BizboxBrandMark";
-import { CompanyPatternIcon } from "./CompanyPatternIcon";
 import { TopNavItem } from "./TopNavItem";
 
-type GlobalToolbarContext = { companyId: string | null; companyPrefix: string | null };
+type GlobalToolbarContext = {
+  companyId: string | null;
+  companyPrefix: string | null;
+};
 
 const TOP_NAV_ITEMS = [
   { to: "/dashboard", label: "Overview", icon: LayoutDashboard },
@@ -38,7 +47,10 @@ const TOP_LEVEL_BREADCRUMB_LABELS = new Set([
 ]);
 
 function GlobalToolbarPlugins({ context }: { context: GlobalToolbarContext }) {
-  const { slots } = usePluginSlots({ slotTypes: ["globalToolbarButton"], companyId: context.companyId });
+  const { slots } = usePluginSlots({
+    slotTypes: ["globalToolbarButton"],
+    companyId: context.companyId,
+  });
   const { launchers } = usePluginLaunchers({
     placementZones: ["globalToolbarButton"],
     companyId: context.companyId,
@@ -47,19 +59,29 @@ function GlobalToolbarPlugins({ context }: { context: GlobalToolbarContext }) {
   if (slots.length === 0 && launchers.length === 0) return null;
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
-      <PluginSlotOutlet slotTypes={["globalToolbarButton"]} context={context} className="flex items-center gap-1" />
-      <PluginLauncherOutlet placementZones={["globalToolbarButton"]} context={context} className="flex items-center gap-1" />
+      <PluginSlotOutlet
+        slotTypes={["globalToolbarButton"]}
+        context={context}
+        className="flex items-center gap-1"
+      />
+      <PluginLauncherOutlet
+        placementZones={["globalToolbarButton"]}
+        context={context}
+        className="flex items-center gap-1"
+      />
     </div>
   );
 }
 
 function openSearch() {
-  document.dispatchEvent(new KeyboardEvent("keydown", {
-    key: "k",
-    metaKey: true,
-    bubbles: true,
-    cancelable: true,
-  }));
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "k",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
 }
 
 export function BreadcrumbBar() {
@@ -75,24 +97,9 @@ export function BreadcrumbBar() {
     [selectedCompanyId, selectedCompany?.issuePrefix],
   );
 
-  const globalToolbarSlots = <GlobalToolbarPlugins context={globalToolbarSlotContext} />;
-  const companyIdentity = selectedCompany ? (
-    <div className="hidden min-w-0 items-center gap-2 rounded-full border border-border bg-muted/40 px-2.5 py-1.5 xl:flex">
-      <CompanyPatternIcon
-        companyName={selectedCompany.name}
-        logoUrl={selectedCompany.logoUrl}
-        brandColor={selectedCompany.brandColor}
-        className="h-8 w-8 rounded-xl text-sm"
-        logoFit="contain"
-      />
-      <div className="min-w-0">
-        <div className="truncate text-xs font-semibold text-foreground">{selectedCompany.name}</div>
-        <div className="truncate text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          {selectedCompany.issuePrefix}
-        </div>
-      </div>
-    </div>
-  ) : null;
+  const globalToolbarSlots = (
+    <GlobalToolbarPlugins context={globalToolbarSlotContext} />
+  );
 
   const searchButton = (
     <Button
@@ -103,7 +110,9 @@ export function BreadcrumbBar() {
     >
       <Search className="h-4 w-4" />
       <span className="hidden xl:inline">Search</span>
-      <span className="hidden text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80 xl:inline">Cmd+K</span>
+      <span className="hidden text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80 xl:inline">
+        Cmd+K
+      </span>
     </Button>
   );
 
@@ -129,13 +138,14 @@ export function BreadcrumbBar() {
 
   const nav = !isMobile ? (
     <div className="hidden lg:flex lg:items-center lg:gap-2">
-      {TOP_NAV_ITEMS.map((item) => <TopNavItem key={item.to} {...item} />)}
+      {TOP_NAV_ITEMS.map((item) => (
+        <TopNavItem key={item.to} {...item} />
+      ))}
     </div>
   ) : null;
 
   const shellRight = (
     <div className="flex items-center gap-2">
-      {companyIdentity}
       {searchButton}
       {globalToolbarSlots}
     </div>
@@ -145,7 +155,6 @@ export function BreadcrumbBar() {
     return (
       <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
         {menuButton}
-        {!isMobile ? <BizboxBrandMark /> : null}
         {nav}
         <div className="ml-auto">{shellRight}</div>
       </div>
@@ -153,11 +162,12 @@ export function BreadcrumbBar() {
   }
 
   if (breadcrumbs.length === 1) {
-    const showPageTitle = !TOP_LEVEL_BREADCRUMB_LABELS.has(breadcrumbs[0].label);
+    const showPageTitle = !TOP_LEVEL_BREADCRUMB_LABELS.has(
+      breadcrumbs[0].label,
+    );
     return (
       <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
         {menuButton}
-        {!isMobile ? <BizboxBrandMark compact /> : null}
         {nav}
         <div className="min-w-0 flex-1 overflow-hidden">
           {showPageTitle ? (
@@ -174,7 +184,6 @@ export function BreadcrumbBar() {
   return (
     <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
       {menuButton}
-      {!isMobile ? <BizboxBrandMark compact /> : null}
       {nav}
       <div className="min-w-0 flex-1 overflow-hidden">
         <Breadcrumb className="min-w-0 overflow-hidden">
@@ -186,7 +195,9 @@ export function BreadcrumbBar() {
                   {i > 0 && <BreadcrumbSeparator />}
                   <BreadcrumbItem className={isLast ? "min-w-0" : "shrink-0"}>
                     {isLast || !crumb.href ? (
-                      <BreadcrumbPage className="truncate">{crumb.label}</BreadcrumbPage>
+                      <BreadcrumbPage className="truncate">
+                        {crumb.label}
+                      </BreadcrumbPage>
                     ) : (
                       <BreadcrumbLink asChild>
                         <Link to={crumb.href}>{crumb.label}</Link>

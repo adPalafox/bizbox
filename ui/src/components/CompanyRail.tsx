@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/tooltip";
 import type { Company } from "@paperclipai/shared";
 import { CompanyPatternIcon } from "./CompanyPatternIcon";
-import { BizboxBrandMark } from "./BizboxBrandMark";
 
 function SortableCompanyItem({
   company,
@@ -64,7 +63,13 @@ function SortableCompanyItem({
   };
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="overflow-visible">
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="overflow-visible"
+    >
       <Tooltip delayDuration={300}>
         <TooltipTrigger asChild>
           <a
@@ -83,13 +88,14 @@ function SortableCompanyItem({
             <div
               className={cn(
                 "absolute left-[-14px] w-1 rounded-r-full bg-foreground transition-[height] duration-150",
-                isSelected
-                  ? "h-5"
-                  : "h-0 group-hover:h-2"
+                isSelected ? "h-5" : "h-0 group-hover:h-2",
               )}
             />
             <div
-              className={cn("relative overflow-visible transition-transform duration-150", isDragging && "scale-105")}
+              className={cn(
+                "relative overflow-visible transition-transform duration-150",
+                isDragging && "scale-105",
+              )}
             >
               <CompanyPatternIcon
                 companyName={company.name}
@@ -140,7 +146,10 @@ export function CompanyRail() {
     queryFn: () => authApi.getSession(),
   });
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
-  const companyIds = useMemo(() => sidebarCompanies.map((company) => company.id), [sidebarCompanies]);
+  const companyIds = useMemo(
+    () => sidebarCompanies.map((company) => company.id),
+    [sidebarCompanies],
+  );
 
   const liveRunsQueries = useQueries({
     queries: companyIds.map((companyId) => ({
@@ -181,7 +190,7 @@ export function CompanyRail() {
     // Keep sidebar reordering mouse-only so touch input can scroll/tap without drag affordances.
     useSensor(MouseSensor, {
       activationConstraint: { distance: 8 },
-    })
+    }),
   );
 
   const handleDragEnd = useCallback(
@@ -196,15 +205,11 @@ export function CompanyRail() {
 
       persistOrder(arrayMove(ids, oldIndex, newIndex));
     },
-    [orderedCompanies, persistOrder]
+    [orderedCompanies, persistOrder],
   );
 
   return (
     <div className="brand-shell flex h-full w-[84px] shrink-0 flex-col items-center border-r border-border/60 bg-background/95">
-      <div className="flex h-16 w-full shrink-0 items-center justify-center">
-        <BizboxBrandMark compact className="gap-0" />
-      </div>
-
       <div className="flex w-full flex-1 flex-col items-center gap-3 overflow-y-auto overflow-x-hidden py-3 scrollbar-none">
         <DndContext
           sensors={sensors}
@@ -220,8 +225,12 @@ export function CompanyRail() {
                 key={company.id}
                 company={company}
                 isSelected={company.id === highlightedCompanyId}
-                hasLiveAgents={hasLiveAgentsByCompanyId.get(company.id) ?? false}
-                hasUnreadInbox={hasUnreadInboxByCompanyId.get(company.id) ?? false}
+                hasLiveAgents={
+                  hasLiveAgentsByCompanyId.get(company.id) ?? false
+                }
+                hasUnreadInbox={
+                  hasUnreadInboxByCompanyId.get(company.id) ?? false
+                }
                 onSelect={() => {
                   setSelectedCompanyId(company.id);
                   if (isInstanceRoute) {
