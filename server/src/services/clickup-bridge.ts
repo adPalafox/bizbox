@@ -13,6 +13,7 @@ type TriggerMode = "api_comment_only" | "automation_trigger";
 const MAX_OUTBOUND_ATTEMPTS = 5;
 const MAX_POLL_FAILURES = 10;
 const MAX_IMPORTED_IDS = 1000;
+const MIN_POLL_CLAIM_MS = 45_000;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -107,6 +108,10 @@ function nextRetryAt(attempt: number, now = Date.now()): Date {
   const seq = [5, 10, 20, 40, 80];
   const sec = seq[Math.min(Math.max(attempt - 1, 0), seq.length - 1)] ?? 80;
   return new Date(now + sec * 1000);
+}
+
+function computePollClaimMs(timeoutSec: number): number {
+  return Math.max(MIN_POLL_CLAIM_MS, timeoutSec * 2 * 1000);
 }
 
 function buildTaskName(context: Record<string, unknown>, taskKey: string): string {
@@ -367,8 +372,13 @@ export function clickupBridgeService(db: Db) {
             updatedAt: new Date(),
           }).where(eq(clickupOutboundEvents.id, event.id));
           if (bridge) {
+            const nextBridgeStatus = bridge.status === "closed"
+              ? "closed"
+              : terminal
+                ? "failed"
+                : bridge.status;
             await db.update(clickupBridges).set({
-              status: terminal ? "failed" : bridge.status,
+              status: nextBridgeStatus,
               lastError: msg,
               updatedAt: new Date(),
             }).where(eq(clickupBridges.id, bridge.id));
@@ -392,11 +402,10 @@ export function clickupBridgeService(db: Db) {
 
       for (const bridge of bridges) {
         if (!bridge.clickupTaskId) continue;
-        const claimUntil = new Date(Date.now() + 10 * 1000);
         const [claimedBridge] = await db
           .update(clickupBridges)
           .set({
-            nextPollAt: claimUntil,
+            nextPollAt: new Date(Date.now() + MIN_POLL_CLAIM_MS),
             updatedAt: new Date(),
           })
           .where(
@@ -412,6 +421,11 @@ export function clickupBridgeService(db: Db) {
         try {
           const agent = await db.select().from(agents).where(eq(agents.id, bridge.agentId)).then((rows) => rows[0] ?? null);
           const cfg = resolveConfig(parseObject(agent?.adapterConfig));
+          const claimMs = computePollClaimMs(cfg.timeoutSec);
+          await db.update(clickupBridges).set({
+            nextPollAt: new Date(Date.now() + claimMs),
+            updatedAt: new Date(),
+          }).where(eq(clickupBridges.id, bridge.id));
           const headers = { "Content-Type": "application/json", Authorization: cfg.authToken };
           const res = await clickupRequest(`${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}/comment`, { method: "GET", headers }, cfg.timeoutSec);
           if (!res.ok) throw new Error(`clickup poll failed: ${res.status}`);
@@ -422,6 +436,10 @@ export function clickupBridgeService(db: Db) {
 
           const replyRows: unknown[] = [];
           for (const top of comments) {
+            await db.update(clickupBridges).set({
+              nextPollAt: new Date(Date.now() + claimMs),
+              updatedAt: new Date(),
+            }).where(eq(clickupBridges.id, bridge.id));
             const topRecord = top && typeof top === "object" ? (top as Record<string, unknown>) : null;
             const topId = asString(topRecord?.id);
             if (!topId) continue;
@@ -450,6 +468,10 @@ export function clickupBridgeService(db: Db) {
             .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 
           for (const item of candidates) {
+            await db.update(clickupBridges).set({
+              nextPollAt: new Date(Date.now() + claimMs),
+              updatedAt: new Date(),
+            }).where(eq(clickupBridges.id, bridge.id));
             if (bridge.sourceType === "issue") {
               const comment = await issuesSvc.addComment(bridge.sourceId, item.text, { agentId: bridge.agentId });
               const issue = await issuesSvc.getById(bridge.sourceId);

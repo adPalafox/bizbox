@@ -1055,6 +1055,67 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     }));
   });
 
+  it("keeps deliberately closed bridges closed when outbound retries exhaust", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Closed ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const [closedBridge] = await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: randomUUID(),
+      taskKey: "issue:closed",
+      clickupListId: "list-1",
+      status: "closed",
+      nextPollAt: null,
+    }).returning();
+
+    await db.insert(clickupOutboundEvents).values({
+      bridgeId: closedBridge!.id,
+      kind: "append_comment",
+      status: "pending",
+      attempts: 4,
+      payload: { body: "stale body", taskName: "Closed task" },
+    });
+
+    await clickupBridgeService(db).processOutbound();
+
+    const bridge = await db.select().from(clickupBridges).then((rows) => rows.find((row) => row.id === closedBridge!.id) ?? null);
+    const event = await db.select().from(clickupOutboundEvents).then((rows) => rows.find((row) => row.bridgeId === closedBridge!.id) ?? null);
+    expect(bridge).toEqual(expect.objectContaining({
+      status: "closed",
+      lastError: "clickup bridge not runnable: closed",
+    }));
+    expect(event).toEqual(expect.objectContaining({
+      status: "failed",
+      attempts: 5,
+      lastError: "clickup bridge not runnable: closed",
+    }));
+  });
+
   it("does not let exhausted failed events crowd out runnable outbound work", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();
