@@ -43,7 +43,7 @@ function resolveConfig(config: Record<string, unknown>): {
   listId: string;
   apiBaseUrl: string;
   authToken: string;
-  bridgeBotUserId: string;
+  bridgeBotUserId: string | null;
   clickupAgentName?: string;
   clickupAgentUrl?: string;
   includeContextJson: boolean;
@@ -55,15 +55,15 @@ function resolveConfig(config: Record<string, unknown>): {
   const listId = asString(parsed.listId);
   const apiBaseUrl = asString(parsed.apiBaseUrl) || "https://api.clickup.com/api/v2";
   const authToken = asString(parsed.authToken);
-  const bridgeBotUserId = asScalarString(parsed.bridgeBotUserId) || asScalarString(parsed.clickupAgentUserId);
+  const bridgeBotUserId = asScalarString(parsed.bridgeBotUserId) || null;
   const clickupAgentName = asString(parsed.clickupAgentName) || undefined;
   const clickupAgentUrl = asString(parsed.clickupAgentUrl) || undefined;
   const includeContextJson = parsed.includeContextJson !== false;
   const mode: TriggerMode = asString(parsed.triggerMode) === "automation_trigger" ? "automation_trigger" : "api_comment_only";
   const statusToTriggerAgent = asString(parsed.statusToTriggerAgent) || asString(parsed.automationStatus) || null;
   const timeoutSec = Math.min(30, Math.max(10, asNumber(parsed.timeoutSec, 20)));
-  if (!listId || !authToken || !bridgeBotUserId) {
-    throw new Error("clickup_agent_ref requires listId, authToken, bridgeBotUserId (or clickupAgentUserId)");
+  if (!listId || !authToken) {
+    throw new Error("clickup_agent_ref requires listId and authToken");
   }
   return {
     listId,
@@ -124,7 +124,7 @@ function buildTaskName(context: Record<string, unknown>, taskKey: string): strin
   return title || identifier || taskKey;
 }
 
-export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string): { id: string; text: string; createdAt: number } | null {
+export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string | null): { id: string; text: string; createdAt: number } | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
   const id = asScalarString(row.id);
@@ -134,7 +134,7 @@ export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string): {
   const isSystem = typeof row.comment === "object" && row.comment !== null && !Array.isArray(row.comment);
   const createdAt = Number(asScalarString(row.date) || 0);
   if (!id || !text || !authorId) return null;
-  if (authorId === bridgeBotUserId) return null;
+  if (bridgeBotUserId && authorId === bridgeBotUserId) return null;
   if (isSystem) return null;
   return { id, text, createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now() };
 }
@@ -278,17 +278,23 @@ export function clickupBridgeService(db: Db) {
         if (event.attempts >= MAX_OUTBOUND_ATTEMPTS) continue;
         await db.update(clickupOutboundEvents).set({ status: "processing", updatedAt: new Date() }).where(eq(clickupOutboundEvents.id, event.id));
 
-        const [bridge] = await db.select().from(clickupBridges).where(eq(clickupBridges.id, event.bridgeId));
-        if (!bridge || bridge.status === "failed" || bridge.status === "closed") continue;
-
-        const [agent] = await db.select().from(agents).where(eq(agents.id, bridge.agentId));
-        const cfg = resolveConfig(parseObject(agent?.adapterConfig));
-        const headers = { "Content-Type": "application/json", Authorization: cfg.authToken };
-        const payload = parseObject(event.payload);
-        const body = asString(payload.body);
-        const taskName = asString(payload.taskName) || bridge.taskKey;
+        let bridge = await db.select().from(clickupBridges).where(eq(clickupBridges.id, event.bridgeId)).then((rows) => rows[0] ?? null);
 
         try {
+          if (!bridge) {
+            throw new Error("clickup bridge missing");
+          }
+          if (bridge.status === "failed" || bridge.status === "closed") {
+            throw new Error(`clickup bridge not runnable: ${bridge.status}`);
+          }
+
+          const agent = await db.select().from(agents).where(eq(agents.id, bridge.agentId)).then((rows) => rows[0] ?? null);
+          const cfg = resolveConfig(parseObject(agent?.adapterConfig));
+          const headers = { "Content-Type": "application/json", Authorization: cfg.authToken };
+          const payload = parseObject(event.payload);
+          const body = asString(payload.body);
+          const taskName = asString(payload.taskName) || bridge.taskKey;
+
           if (!bridge.clickupTaskId) {
             const res = await clickupRequest(
               `${cfg.apiBaseUrl}/list/${cfg.listId}/task`,
@@ -360,11 +366,13 @@ export function clickupBridgeService(db: Db) {
             nextAttemptAt: terminal ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : nextRetryAt(attempts),
             updatedAt: new Date(),
           }).where(eq(clickupOutboundEvents.id, event.id));
-          await db.update(clickupBridges).set({
-            status: terminal ? "failed" : bridge.status,
-            lastError: msg,
-            updatedAt: new Date(),
-          }).where(eq(clickupBridges.id, bridge.id));
+          if (bridge) {
+            await db.update(clickupBridges).set({
+              status: terminal ? "failed" : bridge.status,
+              lastError: msg,
+              updatedAt: new Date(),
+            }).where(eq(clickupBridges.id, bridge.id));
+          }
         }
       }
     },
@@ -384,9 +392,7 @@ export function clickupBridgeService(db: Db) {
 
       for (const bridge of bridges) {
         if (!bridge.clickupTaskId) continue;
-        const [agent] = await db.select().from(agents).where(eq(agents.id, bridge.agentId));
-        const cfg = resolveConfig(parseObject(agent?.adapterConfig));
-        const claimUntil = new Date(Date.now() + Math.max(cfg.timeoutSec, 10) * 1000);
+        const claimUntil = new Date(Date.now() + 10 * 1000);
         const [claimedBridge] = await db
           .update(clickupBridges)
           .set({
@@ -402,9 +408,11 @@ export function clickupBridgeService(db: Db) {
           )
           .returning({ id: clickupBridges.id });
         if (!claimedBridge) continue;
-        const headers = { "Content-Type": "application/json", Authorization: cfg.authToken };
 
         try {
+          const agent = await db.select().from(agents).where(eq(agents.id, bridge.agentId)).then((rows) => rows[0] ?? null);
+          const cfg = resolveConfig(parseObject(agent?.adapterConfig));
+          const headers = { "Content-Type": "application/json", Authorization: cfg.authToken };
           const res = await clickupRequest(`${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}/comment`, { method: "GET", headers }, cfg.timeoutSec);
           if (!res.ok) throw new Error(`clickup poll failed: ${res.status}`);
 
