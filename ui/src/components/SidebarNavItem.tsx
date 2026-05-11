@@ -44,7 +44,7 @@ export function SidebarNavItem({
           "group flex items-center gap-3 rounded-2xl border border-transparent px-3 py-2.5 text-[13px] font-medium transition-all",
           isActive
             ? "border-primary/35 bg-primary/[0.14] text-foreground shadow-[0_10px_30px_rgba(255,126,28,0.16)]"
-            : "text-foreground/78 hover:border-white/8 hover:bg-white/4 hover:text-foreground",
+            : "text-foreground/78 hover:border-border hover:bg-muted/40 hover:text-foreground",
           className,
         )
       }

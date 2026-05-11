@@ -64,7 +64,7 @@ export function Sidebar() {
         <Button
           variant="ghost"
           size="icon-sm"
-          className="shrink-0 rounded-full border border-white/8 bg-white/[0.03] text-muted-foreground hover:border-white/14 hover:bg-white/[0.06] hover:text-foreground"
+          className="shrink-0 rounded-full border border-border bg-muted/30 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
           onClick={openSearch}
         >
           <Search className="h-4 w-4" />
