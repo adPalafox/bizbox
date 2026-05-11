@@ -105,7 +105,7 @@ export function BreadcrumbBar() {
     <Button
       variant="ghost"
       size="sm"
-      className="rounded-full border border-border bg-muted/40 px-3 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+      className="rounded-full border border-border bg-muted/40 px-3 text-muted-foreground hover:bg-muted/60 hover:text-foreground "
       onClick={openSearch}
     >
       <Search className="h-4 w-4" />
@@ -151,40 +151,11 @@ export function BreadcrumbBar() {
     </div>
   );
 
-  if (breadcrumbs.length === 0) {
-    return (
-      <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
-        {menuButton}
-        {nav}
-        <div className="ml-auto">{shellRight}</div>
-      </div>
-    );
-  }
-
-  if (breadcrumbs.length === 1) {
-    const showPageTitle = !TOP_LEVEL_BREADCRUMB_LABELS.has(
-      breadcrumbs[0].label,
-    );
-    return (
-      <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
-        {menuButton}
-        {nav}
-        <div className="min-w-0 flex-1 overflow-hidden">
-          {showPageTitle ? (
-            <h1 className="truncate text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              {breadcrumbs[0].label}
-            </h1>
-          ) : null}
-        </div>
-        {shellRight}
-      </div>
-    );
-  }
-
   return (
     <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
       {menuButton}
       {nav}
+      <span className="text-muted select-none">|</span>
       <div className="min-w-0 flex-1 overflow-hidden">
         <Breadcrumb className="min-w-0 overflow-hidden">
           <BreadcrumbList className="flex-nowrap">
