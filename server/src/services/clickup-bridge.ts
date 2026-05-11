@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, or } from "drizzle-orm";
+import { and, eq, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { buildClickUpContextBody } from "@paperclipai/adapter-clickup-agent-ref/server";
 import { agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
@@ -109,6 +109,21 @@ function nextRetryAt(attempt: number, now = Date.now()): Date {
   return new Date(now + sec * 1000);
 }
 
+function buildTaskName(context: Record<string, unknown>, taskKey: string): string {
+  const issue = parseObject(context.issue);
+  const wake = parseObject(context.paperclipWake);
+  const wakeIssue = parseObject(wake.issue);
+  const title =
+    asString(issue.title)
+    || asString(wakeIssue.title)
+    || asString(context.issueTitle);
+  const identifier =
+    asString(issue.identifier)
+    || asString(wakeIssue.identifier);
+  if (title && identifier) return `${identifier} - ${title}`;
+  return title || identifier || taskKey;
+}
+
 export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string): { id: string; text: string; createdAt: number } | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
@@ -160,6 +175,12 @@ export function clickupBridgeService(db: Db) {
     async enqueueFromWake(input: { companyId: string; agentId: string; context: Record<string, unknown>; config: Record<string, unknown> }) {
       const source = resolveBridgeSource(input.context);
       const cfg = resolveConfig(input.config);
+      const taskName = buildTaskName(input.context, source.taskKey);
+      const body = buildClickUpContextBody(input.context, {
+        clickupAgentName: cfg.clickupAgentName,
+        clickupAgentUrl: cfg.clickupAgentUrl,
+        includeContextJson: cfg.includeContextJson,
+      });
       const now = new Date();
       const [upsertedBridge] = await db
         .insert(clickupBridges)
@@ -219,11 +240,8 @@ export function clickupBridgeService(db: Db) {
             kind: eventKind,
             status: "pending",
             payload: {
-              body: buildClickUpContextBody(input.context, {
-                clickupAgentName: cfg.clickupAgentName,
-                clickupAgentUrl: cfg.clickupAgentUrl,
-                includeContextJson: cfg.includeContextJson,
-              }),
+              body,
+              taskName,
             },
           });
         }
@@ -233,11 +251,8 @@ export function clickupBridgeService(db: Db) {
           kind: eventKind,
           status: "pending",
           payload: {
-            body: buildClickUpContextBody(input.context, {
-              clickupAgentName: cfg.clickupAgentName,
-              clickupAgentUrl: cfg.clickupAgentUrl,
-              includeContextJson: cfg.includeContextJson,
-            }),
+            body,
+            taskName,
           },
         });
       }
@@ -253,6 +268,7 @@ export function clickupBridgeService(db: Db) {
         .where(
           and(
             or(eq(clickupOutboundEvents.status, "pending"), eq(clickupOutboundEvents.status, "failed")),
+            lt(clickupOutboundEvents.attempts, MAX_OUTBOUND_ATTEMPTS),
             or(isNull(clickupOutboundEvents.nextAttemptAt), lte(clickupOutboundEvents.nextAttemptAt, now)),
           ),
         )
@@ -268,13 +284,15 @@ export function clickupBridgeService(db: Db) {
         const [agent] = await db.select().from(agents).where(eq(agents.id, bridge.agentId));
         const cfg = resolveConfig(parseObject(agent?.adapterConfig));
         const headers = { "Content-Type": "application/json", Authorization: cfg.authToken };
-        const body = asString(parseObject(event.payload).body);
+        const payload = parseObject(event.payload);
+        const body = asString(payload.body);
+        const taskName = asString(payload.taskName) || bridge.taskKey;
 
         try {
           if (!bridge.clickupTaskId) {
             const res = await clickupRequest(
               `${cfg.apiBaseUrl}/list/${cfg.listId}/task`,
-              { method: "POST", headers, body: JSON.stringify({ name: bridge.taskKey, description: body, notify_all: false }) },
+              { method: "POST", headers, body: JSON.stringify({ name: taskName, description: body, notify_all: false }) },
               cfg.timeoutSec,
             );
             if (!res.ok) throw new Error(`clickup create task failed: ${res.status}`);
@@ -336,10 +354,10 @@ export function clickupBridgeService(db: Db) {
           const msg = err instanceof Error ? err.message : String(err);
           const terminal = attempts >= MAX_OUTBOUND_ATTEMPTS;
           await db.update(clickupOutboundEvents).set({
-            status: terminal ? "failed" : "failed",
+            status: terminal ? "failed" : "pending",
             attempts,
             lastError: msg,
-            nextAttemptAt: terminal ? null : nextRetryAt(attempts),
+            nextAttemptAt: terminal ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : nextRetryAt(attempts),
             updatedAt: new Date(),
           }).where(eq(clickupOutboundEvents.id, event.id));
           await db.update(clickupBridges).set({
