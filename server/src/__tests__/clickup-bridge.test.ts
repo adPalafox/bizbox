@@ -867,6 +867,78 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(firstComment?.body.comment_text).toBe(createTask?.body.description);
   });
 
+  it("marks create-task parse failures terminal to avoid duplicate ClickUp tasks", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/list/list-1/task")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => "<html>edge cache weirdness</html>",
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const svc = clickupBridgeService(db);
+    await svc.enqueueFromWake({
+      companyId,
+      agentId,
+      context: {
+        paperclipWake: {
+          issue: {
+            id: issueId,
+            identifier: "TES-17",
+            title: "Do not duplicate task creation",
+          },
+        },
+      },
+      config: { listId: "list-1", authToken: "token-1", bridgeBotUserId: "bridge-bot-1" },
+    });
+
+    await svc.processOutbound();
+
+    const [event] = await db.select().from(clickupOutboundEvents);
+    const [bridge] = await db.select().from(clickupBridges);
+    expect(event).toEqual(expect.objectContaining({
+      status: "failed",
+      attempts: 5,
+      lastError: expect.stringContaining("clickup create task response parse failed:"),
+    }));
+    expect(bridge).toEqual(expect.objectContaining({
+      status: "failed",
+      clickupTaskId: null,
+      lastError: expect.stringContaining("clickup create task response parse failed:"),
+    }));
+  });
+
   it("requeues transient outbound failures as pending with a retry timestamp", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new Error("ClickUp unavailable");

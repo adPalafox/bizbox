@@ -114,6 +114,23 @@ function computePollClaimMs(timeoutSec: number): number {
   return Math.max(MIN_POLL_CLAIM_MS, timeoutSec * 2 * 1000);
 }
 
+function parseCreatedTaskResponse(rawText: string): { taskId: string; taskUrl: string | null } {
+  try {
+    const json = parseObject(JSON.parse(rawText));
+    const taskId = asString(json.id);
+    if (!taskId) {
+      throw new Error("clickup create task missing id");
+    }
+    return {
+      taskId,
+      taskUrl: asString(json.url) || null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`clickup create task response parse failed: ${message}`);
+  }
+}
+
 function buildTaskName(context: Record<string, unknown>, taskKey: string): string {
   const issue = parseObject(context.issue);
   const wake = parseObject(context.paperclipWake);
@@ -307,9 +324,8 @@ export function clickupBridgeService(db: Db) {
               cfg.timeoutSec,
             );
             if (!res.ok) throw new Error(`clickup create task failed: ${res.status}`);
-            const json = parseObject(JSON.parse(res.text));
-            const taskId = asString(json.id);
-            if (!taskId) throw new Error("clickup create task missing id");
+            const createdTask = parseCreatedTaskResponse(res.text);
+            const taskId = createdTask.taskId;
 
             const firstComment = await clickupRequest(
               `${cfg.apiBaseUrl}/task/${taskId}/comment`,
@@ -321,7 +337,7 @@ export function clickupBridgeService(db: Db) {
 
             await db.update(clickupBridges).set({
               clickupTaskId: taskId,
-              clickupTaskUrl: asString(json.url) || null,
+              clickupTaskUrl: createdTask.taskUrl,
               status: "waiting_for_agent_reply",
               importedCommentIds: firstCommentId ? appendImportedId(bridge.importedCommentIds, firstCommentId) : bridge.importedCommentIds,
               lastOutboundAt: new Date(),
@@ -361,8 +377,11 @@ export function clickupBridgeService(db: Db) {
             updatedAt: new Date(),
           }).where(eq(clickupOutboundEvents.id, event.id));
         } catch (err) {
-          const attempts = event.attempts + 1;
           const msg = err instanceof Error ? err.message : String(err);
+          const nonRetriableCreateParseFailure = msg.startsWith("clickup create task response parse failed:");
+          const attempts = nonRetriableCreateParseFailure
+            ? MAX_OUTBOUND_ATTEMPTS
+            : event.attempts + 1;
           const terminal = attempts >= MAX_OUTBOUND_ATTEMPTS;
           await db.update(clickupOutboundEvents).set({
             status: terminal ? "failed" : "pending",
