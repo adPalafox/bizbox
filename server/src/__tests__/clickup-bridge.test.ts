@@ -12,6 +12,7 @@ import {
   issueComments,
   issues,
 } from "@paperclipai/db";
+import { eq } from "drizzle-orm";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -176,10 +177,10 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
 
     const [bridge] = await db.select().from(clickupBridges);
     expect(bridge).toEqual(expect.objectContaining({
-      status: "agent_replied",
-      nextPollAt: null,
+      status: "waiting_for_agent_reply",
       lastImportedCommentId: "clickup-comment-1",
     }));
+    expect(bridge?.nextPollAt).toBeInstanceOf(Date);
 
     const events = await db.select().from(activityLog);
     expect(events).toHaveLength(1);
@@ -576,10 +577,127 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toBe("Imported from ClickUp");
     expect(bridge).toEqual(expect.objectContaining({
-      status: "agent_replied",
+      status: "waiting_for_agent_reply",
       consecutivePollFailures: 0,
       lastError: null,
     }));
+  });
+
+  it("keeps polling after the first imported reply so later ClickUp replies are also imported", async () => {
+    const replies = [
+      [
+        {
+          id: "clickup-comment-1",
+          comment_text: "First reply",
+          user: { id: 101 },
+          date: 1710000000000,
+        },
+      ],
+      [
+        {
+          id: "clickup-comment-1",
+          comment_text: "First reply",
+          user: { id: 101 },
+          date: 1710000000000,
+        },
+        {
+          id: "clickup-comment-2",
+          comment_text: "Second reply",
+          user: { id: 101 },
+          date: 1710000005000,
+        },
+      ],
+    ];
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/task/task-1/comment")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            comments: replies.shift() ?? [],
+          }),
+        };
+      }
+      if (url.endsWith("/comment/clickup-comment-1/reply") || url.endsWith("/comment/clickup-comment-2/reply")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ comments: [] }),
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      issueNumber: 16,
+      identifier: "TES-16",
+      title: "Import follow-up ClickUp replies",
+      status: "todo",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: issueId,
+      taskKey: "issue:TES-16",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date(Date.now() - 60_000),
+    });
+
+    const svc = clickupBridgeService(db);
+    await svc.pollInbound();
+    await db.update(clickupBridges).set({
+      nextPollAt: new Date(Date.now() - 1_000),
+      updatedAt: new Date(),
+    }).where(eq(clickupBridges.sourceId, issueId));
+    await svc.pollInbound();
+
+    const comments = await db.select().from(issueComments);
+    expect(comments).toHaveLength(2);
+    expect(comments.map((comment) => comment.body)).toEqual(["First reply", "Second reply"]);
+
+    const [bridge] = await db.select().from(clickupBridges);
+    expect(bridge).toEqual(expect.objectContaining({
+      status: "waiting_for_agent_reply",
+      lastImportedCommentId: "clickup-comment-2",
+    }));
+    expect(bridge?.nextPollAt).toBeInstanceOf(Date);
   });
 
   it("imports ClickUp replies into active agent threads", async () => {

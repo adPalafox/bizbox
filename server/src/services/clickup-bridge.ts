@@ -246,8 +246,8 @@ export function clickupBridgeService(db: Db) {
         const [reopened] = await db
           .update(clickupBridges)
           .set({
-            status: bridge.clickupTaskId ? "agent_replied" : "pending_clickup_task",
-            nextPollAt: bridge.clickupTaskId ? null : now,
+            status: bridge.clickupTaskId ? "waiting_for_agent_reply" : "pending_clickup_task",
+            nextPollAt: now,
             lastError: null,
             updatedAt: now,
           })
@@ -562,9 +562,9 @@ export function clickupBridgeService(db: Db) {
             importedCommentIds: Array.from(imported).slice(-MAX_IMPORTED_IDS),
             lastImportedCommentId: candidates[candidates.length - 1]?.id ?? bridge.lastImportedCommentId,
             lastPolledAt: new Date(),
-            nextPollAt: candidates.length > 0 ? null : nextPollAt(Date.now(), bridge.lastOutboundAt, bridge.lastPolledAt),
+            nextPollAt: nextPollAt(Date.now(), bridge.lastOutboundAt, bridge.lastPolledAt),
             consecutivePollFailures: 0,
-            status: candidates.length > 0 ? "agent_replied" : bridge.status,
+            status: "waiting_for_agent_reply",
             lastError: null,
             updatedAt: new Date(),
           }).where(eq(clickupBridges.id, bridge.id));

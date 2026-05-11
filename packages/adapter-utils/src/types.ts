@@ -380,6 +380,15 @@ export interface ServerAdapterModule {
    * set this to false.
    */
   requiresLiveExecutionPath?: boolean;
+
+  /**
+   * How server heartbeat wakeups should dispatch this adapter.
+   *
+   * Most adapters execute directly. Bridge/reference adapters can declare an
+   * explicit alternate server wakeup contract while still exposing execute()
+   * for CLI flows and tests.
+   */
+  serverHeartbeatExecutionMode?: "execute" | "clickup_bridge";
 }
 
 // ---------------------------------------------------------------------------

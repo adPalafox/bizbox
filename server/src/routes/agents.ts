@@ -88,7 +88,7 @@ import { getTelemetryClient } from "../telemetry.js";
 
 const RUN_LOG_DEFAULT_LIMIT_BYTES = 256_000;
 const RUN_LOG_MAX_LIMIT_BYTES = 1024 * 1024;
-const CLICKUP_ACTIVE_BRIDGE_STATUSES = ["waiting_for_agent_reply"] as const;
+const CLICKUP_ACTIVE_BRIDGE_STATUSES = ["pending_clickup_task", "waiting_for_agent_reply"] as const;
 
 function readRunLogLimitBytes(value: unknown) {
   const parsed = Number(value ?? RUN_LOG_DEFAULT_LIMIT_BYTES);

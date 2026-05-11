@@ -5983,7 +5983,7 @@ export function heartbeatService(db: Db) {
           "local agent jwt secret missing or invalid; running without injected BIZBOX_API_KEY",
         );
       }
-      const adapterResult: AdapterExecutionResult = agent.adapterType === "clickup_agent_ref"
+      const adapterResult: AdapterExecutionResult = adapter.serverHeartbeatExecutionMode === "clickup_bridge"
         ? await (async () => {
             const queued = await clickupBridge.enqueueFromWake({
               companyId: agent.companyId,

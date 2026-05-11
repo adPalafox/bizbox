@@ -252,6 +252,9 @@ const clickUpAgentRefAdapter: ServerAdapterModule = {
   supportsInstructionsBundle: false,
   requiresMaterializedRuntimeSkills: false,
   requiresLiveExecutionPath: false,
+  // Server heartbeats enqueue bridge work instead of invoking execute();
+  // execute remains available for CLI/test flows.
+  serverHeartbeatExecutionMode: "clickup_bridge",
   agentConfigurationDoc: clickUpAgentRefConfigurationDoc,
 };
 
