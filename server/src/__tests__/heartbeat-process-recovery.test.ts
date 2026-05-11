@@ -7,6 +7,7 @@ import {
   agents,
   agentRuntimeState,
   agentWakeupRequests,
+  clickupBridges,
   companySkills,
   companies,
   createDb,
@@ -313,6 +314,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     await db.delete(documentRevisions);
     await db.delete(documents);
     await db.delete(issueRelations);
+    await db.delete(clickupBridges);
     await db.delete(routineRuns);
     await db.delete(routines);
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -866,6 +868,96 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       timeoutConfigured: false,
       timeoutFired: false,
     });
+  });
+
+  it("closes an active ClickUp bridge when its run is cancelled", async () => {
+    const { companyId, agentId, runId } = await seedRunFixture({
+      adapterType: "clickup_agent_ref",
+      agentStatus: "running",
+      includeIssue: false,
+    });
+    const bridgeId = randomUUID();
+    const heartbeat = heartbeatService(db);
+
+    await db.insert(clickupBridges).values({
+      id: bridgeId,
+      companyId,
+      agentId,
+      sourceType: "agent_thread",
+      sourceId: "thread-1",
+      taskKey: "agent-thread:thread-1",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date("2026-03-19T00:01:00.000Z"),
+    });
+
+    await db
+      .update(heartbeatRuns)
+      .set({
+        resultJson: {
+          clickupBridgeId: bridgeId,
+          status: "pending_external",
+        },
+      })
+      .where(eq(heartbeatRuns.id, runId));
+
+    await heartbeat.cancelRun(runId);
+
+    const [bridge] = await db
+      .select()
+      .from(clickupBridges)
+      .where(eq(clickupBridges.id, bridgeId));
+
+    expect(bridge?.status).toBe("closed");
+    expect(bridge?.nextPollAt).toBeNull();
+  });
+
+  it("closes an active ClickUp bridge when stopping a synthetic live run backed by a succeeded heartbeat run", async () => {
+    const { companyId, agentId, runId } = await seedRunFixture({
+      adapterType: "clickup_agent_ref",
+      agentStatus: "idle",
+      includeIssue: false,
+      runStatus: "succeeded",
+    });
+    const bridgeId = randomUUID();
+    const heartbeat = heartbeatService(db);
+
+    await db.insert(clickupBridges).values({
+      id: bridgeId,
+      companyId,
+      agentId,
+      sourceType: "agent_thread",
+      sourceId: "thread-1",
+      taskKey: "agent-thread:thread-1",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date("2026-03-19T00:01:00.000Z"),
+    });
+
+    await db
+      .update(heartbeatRuns)
+      .set({
+        resultJson: {
+          clickupBridgeId: bridgeId,
+          status: "pending_external",
+          pollingActive: true,
+        },
+      })
+      .where(eq(heartbeatRuns.id, runId));
+
+    const returned = await heartbeat.cancelRun(runId);
+
+    expect(returned?.status).toBe("succeeded");
+
+    const [bridge] = await db
+      .select()
+      .from(clickupBridges)
+      .where(eq(clickupBridges.id, bridgeId));
+
+    expect(bridge?.status).toBe("closed");
+    expect(bridge?.nextPollAt).toBeNull();
   });
 
   it("re-enqueues assigned todo work when the last issue run died and no wake remains", async () => {

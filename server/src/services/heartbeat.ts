@@ -24,6 +24,7 @@ import {
   agentTaskSessions,
   agentWakeupRequests,
   activityLog,
+  clickupBridges,
   companySkills as companySkillsTable,
   documentRevisions,
   issueDocuments,
@@ -85,6 +86,7 @@ import {
 } from "./workspace-runtime.js";
 import { issueService } from "./issues.js";
 import { agentThreadService } from "./agent-threads.js";
+import { clickupBridgeService } from "./clickup-bridge.js";
 import { workProductService } from "./work-products.js";
 import {
   getIssueContinuationSummaryDocument,
@@ -1963,6 +1965,7 @@ export function heartbeatService(db: Db) {
   const issuesSvc = issueService(db);
   const workProductsSvc = workProductService(db);
   const agentThreadsSvc = agentThreadService(db);
+  const clickupBridge = clickupBridgeService(db);
   const executionWorkspacesSvc = executionWorkspaceService(db);
   const environmentsSvc = environmentService(db);
   const workspaceOperationsSvc = workspaceOperationService(db);
@@ -5873,26 +5876,60 @@ export function heartbeatService(db: Db) {
           "local agent jwt secret missing or invalid; running without injected BIZBOX_API_KEY",
         );
       }
-      const adapterResult = await adapter.execute({
-        runId: run.id,
-        agent,
-        runtime: runtimeForAdapter,
-        config: runtimeConfig,
-        context,
-        onLog,
-        onMeta: onAdapterMeta,
-        onSpawn: async (meta) => {
-          await persistRunProcessMetadata(run.id, {
-            pid: meta.pid,
-            processGroupId:
-              "processGroupId" in meta && typeof meta.processGroupId === "number"
-                ? meta.processGroupId
-                : null,
-            startedAt: meta.startedAt,
+      const adapterResult: AdapterExecutionResult = agent.adapterType === "clickup_agent_ref"
+        ? await (async () => {
+            const queued = await clickupBridge.enqueueFromWake({
+              companyId: agent.companyId,
+              agentId: agent.id,
+              context,
+              config: runtimeConfig,
+            });
+            await onLog("stdout", `[clickup-agent-ref] queued bridge=${queued.bridgeId}\n`);
+            await onLog("stdout", "[clickup-agent-ref] poller active; checking for replies every 1s dispatcher tick (bridge cadence applies)\n");
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              summary: "ClickUp bridge active: outbound sent, polling for external replies.",
+              provider: "clickup",
+              biller: "clickup",
+              billingType: "fixed",
+              sessionParams: {
+                ...(runtimeForAdapter.sessionParams ?? {}),
+                clickupBridgeId: queued.bridgeId,
+                clickupTaskId: queued.clickupTaskId,
+              },
+              resultJson: {
+                status: "pending_external",
+                requiresLiveExecutionPath: false,
+                clickupBridgeId: queued.bridgeId,
+                clickupTaskId: queued.clickupTaskId,
+                pollingActive: true,
+                pollingDispatcherTickMs: 1000,
+                pollingState: "waiting_for_external_reply",
+              },
+            } satisfies AdapterExecutionResult;
+          })()
+        : await adapter.execute({
+            runId: run.id,
+            agent,
+            runtime: runtimeForAdapter,
+            config: runtimeConfig,
+            context,
+            onLog,
+            onMeta: onAdapterMeta,
+            onSpawn: async (meta) => {
+              await persistRunProcessMetadata(run.id, {
+                pid: meta.pid,
+                processGroupId:
+                  "processGroupId" in meta && typeof meta.processGroupId === "number"
+                    ? meta.processGroupId
+                    : null,
+                startedAt: meta.startedAt,
+              });
+            },
+            authToken: authToken ?? undefined,
           });
-        },
-        authToken: authToken ?? undefined,
-      });
       const adapterManagedRuntimeServices = adapterResult.runtimeServices
         ? await persistAdapterManagedRuntimeServices({
             db,
@@ -7394,9 +7431,33 @@ export function heartbeatService(db: Db) {
   }
 
   async function cancelRunInternal(runId: string, reason = "Cancelled by control plane") {
+    async function closeClickUpBridgeForRun(runRecord: Pick<typeof heartbeatRuns.$inferSelect, "resultJson">) {
+      const result = parseObject(runRecord.resultJson);
+      const clickupBridgeId = typeof result?.clickupBridgeId === "string" ? result.clickupBridgeId : null;
+      if (!clickupBridgeId) return;
+
+      await db
+        .update(clickupBridges)
+        .set({
+          status: "closed",
+          nextPollAt: null,
+          lastError: reason,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(clickupBridges.id, clickupBridgeId),
+            inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+          ),
+        );
+    }
+
     const run = await getRun(runId);
     if (!run) throw notFound("Heartbeat run not found");
-    if (!CANCELLABLE_HEARTBEAT_RUN_STATUSES.includes(run.status as (typeof CANCELLABLE_HEARTBEAT_RUN_STATUSES)[number])) return run;
+    if (!CANCELLABLE_HEARTBEAT_RUN_STATUSES.includes(run.status as (typeof CANCELLABLE_HEARTBEAT_RUN_STATUSES)[number])) {
+      await closeClickUpBridgeForRun(run);
+      return run;
+    }
     const agent = await getAgent(run.agentId);
 
     const running = runningProcesses.get(run.id);
@@ -7432,6 +7493,7 @@ export function heartbeatService(db: Db) {
     });
 
     if (cancelled) {
+      await closeClickUpBridgeForRun(cancelled);
       await appendRunEvent(cancelled, 1, {
         eventType: "lifecycle",
         stream: "system",
@@ -7455,7 +7517,7 @@ export function heartbeatService(db: Db) {
       .where(and(eq(heartbeatRuns.agentId, agentId), inArray(heartbeatRuns.status, [...CANCELLABLE_HEARTBEAT_RUN_STATUSES])));
 
     for (const run of runs) {
-      await setRunStatus(run.id, "cancelled", {
+      const cancelled = await setRunStatus(run.id, "cancelled", {
         finishedAt: new Date(),
         error: reason,
         errorCode: "cancelled",
@@ -7467,6 +7529,9 @@ export function heartbeatService(db: Db) {
           }),
         } : {}),
       });
+      if (cancelled) {
+        await closeClickUpBridgeForRun(cancelled);
+      }
 
       await setWakeupStatus(run.wakeupRequestId, "cancelled", {
         finishedAt: new Date(),
@@ -7775,6 +7840,14 @@ export function heartbeatService(db: Db) {
     reconcileStrandedAssignedIssues,
 
     reconcileIssueGraphLiveness,
+
+    processClickupOutbound: async () => {
+      await clickupBridge.processOutbound();
+    },
+
+    pollClickupInbound: async () => {
+      await clickupBridge.pollInbound();
+    },
 
     tickTimers: async (now = new Date()) => {
       const allAgents = await db.select().from(agents);

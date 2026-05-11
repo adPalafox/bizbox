@@ -21,6 +21,7 @@ export interface ActiveRunForIssue {
   agentName: string;
   adapterType: string;
   issueId?: string | null;
+  agentThreadId?: string | null;
   livenessState?: RunLivenessFields["livenessState"];
   livenessReason?: string | null;
   continuationAttempt?: number;
@@ -40,6 +41,7 @@ export interface LiveRunForIssue {
   agentName: string;
   adapterType: string;
   issueId?: string | null;
+  agentThreadId?: string | null;
   livenessState?: RunLivenessFields["livenessState"];
   livenessReason?: string | null;
   continuationAttempt?: number;

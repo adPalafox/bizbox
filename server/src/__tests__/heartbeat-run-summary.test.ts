@@ -84,6 +84,14 @@ describe("buildHeartbeatRunIssueComment", () => {
   it("returns null when there is no usable final text", () => {
     expect(buildHeartbeatRunIssueComment({ costUsd: 1.2 })).toBeNull();
   });
+
+  it("suppresses bridge status posts while the live polling run is active", () => {
+    expect(buildHeartbeatRunIssueComment({
+      status: "pending_external",
+      pollingActive: true,
+      summary: "ClickUp bridge active: outbound sent, polling for external replies.",
+    })).toBeNull();
+  });
 });
 
 describe("mergeHeartbeatRunResultJson", () => {

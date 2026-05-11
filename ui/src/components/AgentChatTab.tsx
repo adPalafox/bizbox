@@ -113,8 +113,20 @@ export const AgentChatTab = memo(function AgentChatTab({
   );
 
   const liveRuns = useMemo<LiveRunForIssue[]>(
-    () => (companyLiveRuns ?? []).filter((run) => threadRunIds.has(run.id)),
-    [companyLiveRuns, threadRunIds],
+    () => (companyLiveRuns ?? []).filter((run) => {
+      const belongsToThread = (threadId && run.agentThreadId === threadId) || threadRunIds.has(run.id);
+      if (!belongsToThread) return false;
+
+      if (run.triggerDetail !== "clickup_bridge_polling") return true;
+
+      const runCreatedAtMs = Date.parse(run.createdAt);
+      const hasAssistantReplySinceRunStarted = (threadResult?.messages ?? []).some((message) => (
+        message.authorAgentId &&
+        Date.parse(String(message.createdAt)) >= runCreatedAtMs
+      ));
+      return !hasAssistantReplySinceRunStarted;
+    }),
+    [companyLiveRuns, threadId, threadRunIds, threadResult?.messages],
   );
 
   const handleAdd = async (body: string) => {

@@ -17,6 +17,10 @@ function readCommentText(value: unknown) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isPendingExternalPollingResult(resultJson: Record<string, unknown>) {
+  return resultJson.status === "pending_external" && resultJson.pollingActive === true;
+}
+
 export function mergeHeartbeatRunResultJson(
   resultJson: Record<string, unknown> | null | undefined,
   summary: string | null | undefined,
@@ -96,6 +100,9 @@ export function buildHeartbeatRunIssueComment(
   resultJson: Record<string, unknown> | null | undefined,
 ): string | null {
   if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) {
+    return null;
+  }
+  if (isPendingExternalPollingResult(resultJson)) {
     return null;
   }
 

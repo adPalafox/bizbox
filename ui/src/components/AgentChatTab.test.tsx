@@ -31,6 +31,7 @@ vi.mock("../api/heartbeats", () => ({
 vi.mock("./IssueChatThread", () => ({
   IssueChatThread: (props: {
     comments: Array<{ body: string }>;
+    liveRuns?: Array<{ id: string }>;
     showComposer?: boolean;
     emptyMessage?: string;
     onAdd: (body: string) => Promise<void>;
@@ -300,5 +301,130 @@ describe("AgentChatTab", () => {
       { lastReadMessageId: "message-2" },
       "company-1",
     );
+  });
+
+  it("keeps synthetic ClickUp live runs when they point at the current thread", async () => {
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([
+      {
+        id: "run-clickup-1",
+        status: "running",
+        invocationSource: "assignment",
+        triggerDetail: "clickup_bridge_polling",
+        startedAt: "2026-05-04T09:00:00.000Z",
+        finishedAt: null,
+        createdAt: "2026-05-04T09:00:00.000Z",
+        agentId: "agent-1",
+        agentName: "ClickUp Bridge",
+        adapterType: "clickup_agent_ref",
+        issueId: null,
+        agentThreadId: "thread-1",
+        livenessState: "active",
+        livenessReason: "ClickUp bridge is polling for external replies.",
+        continuationAttempt: 0,
+        lastUsefulActionAt: null,
+        nextAction: "Polling ClickUp for external replies.",
+      },
+    ]);
+
+    cleanup = renderWithQueryClient(
+      <AgentChatTab
+        agentId="agent-1"
+        companyId="company-1"
+        runs={[]}
+      />,
+      container,
+    );
+
+    await waitForAssertion(() => {
+      expect(threadPropsSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          liveRuns: [
+            expect.objectContaining({
+              id: "run-clickup-1",
+              agentThreadId: "thread-1",
+            }),
+          ],
+        }),
+      );
+    });
+  });
+
+  it("hides synthetic ClickUp live runs after an assistant reply lands in the thread", async () => {
+    mockAgentsApi.threadMessages.mockResolvedValue({
+      thread: {
+        id: "thread-1",
+        companyId: "company-1",
+        agentId: "agent-1",
+        status: "active",
+        archivedAt: null,
+        lastActivityAt: new Date("2026-05-04T09:02:00.000Z"),
+        createdAt: new Date("2026-05-04T09:00:00.000Z"),
+        updatedAt: new Date("2026-05-04T09:02:00.000Z"),
+      },
+      messages: [
+        {
+          id: "message-1",
+          threadId: "thread-1",
+          companyId: "company-1",
+          role: "user",
+          authorUserId: "user-1",
+          authorAgentId: null,
+          producingHeartbeatRunId: null,
+          body: "hello from board",
+          createdAt: new Date("2026-05-04T09:00:00.000Z"),
+          updatedAt: new Date("2026-05-04T09:00:00.000Z"),
+        },
+        {
+          id: "message-2",
+          threadId: "thread-1",
+          companyId: "company-1",
+          role: "assistant",
+          authorUserId: null,
+          authorAgentId: "agent-1",
+          producingHeartbeatRunId: null,
+          body: "Imported from ClickUp",
+          createdAt: new Date("2026-05-04T09:01:00.000Z"),
+          updatedAt: new Date("2026-05-04T09:01:00.000Z"),
+        },
+      ],
+    });
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([
+      {
+        id: "run-clickup-1",
+        status: "running",
+        invocationSource: "assignment",
+        triggerDetail: "clickup_bridge_polling",
+        startedAt: "2026-05-04T09:00:00.000Z",
+        finishedAt: null,
+        createdAt: "2026-05-04T09:00:00.000Z",
+        agentId: "agent-1",
+        agentName: "ClickUp Bridge",
+        adapterType: "clickup_agent_ref",
+        issueId: null,
+        agentThreadId: "thread-1",
+        livenessState: "active",
+        livenessReason: "ClickUp bridge imported a reply and is still polling for follow-up comments.",
+        continuationAttempt: 0,
+        lastUsefulActionAt: "2026-05-04T09:01:00.000Z",
+        nextAction: "Polling ClickUp for external replies.",
+      },
+    ]);
+
+    cleanup = renderWithQueryClient(
+      <AgentChatTab
+        agentId="agent-1"
+        companyId="company-1"
+        runs={[]}
+      />,
+      container,
+    );
+
+    await waitForAssertion(() => {
+      expect(threadPropsSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          liveRuns: [],
+        }),
+      );
+    });
   });
 });

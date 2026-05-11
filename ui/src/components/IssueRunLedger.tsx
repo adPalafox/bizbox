@@ -164,7 +164,28 @@ function mergeRuns(
   for (const run of runs) byId.set(run.runId, run);
   for (const run of liveRuns ?? []) {
     const existing = byId.get(run.id);
-    byId.set(run.id, existing ? { ...existing, isLive: true, agentName: run.agentName } : liveRunToLedgerRun(run));
+    byId.set(
+      run.id,
+      existing
+        ? {
+            ...existing,
+            status: run.status,
+            invocationSource: run.invocationSource,
+            startedAt: toIsoString(run.startedAt),
+            finishedAt: toIsoString(run.finishedAt),
+            createdAt: toIsoString(run.createdAt) ?? existing.createdAt,
+            agentId: run.agentId,
+            agentName: run.agentName,
+            adapterType: run.adapterType,
+            livenessState: run.livenessState ?? existing.livenessState,
+            livenessReason: run.livenessReason ?? existing.livenessReason,
+            continuationAttempt: run.continuationAttempt ?? existing.continuationAttempt,
+            lastUsefulActionAt: run.lastUsefulActionAt ?? existing.lastUsefulActionAt,
+            nextAction: run.nextAction ?? existing.nextAction,
+            isLive: true,
+          }
+        : liveRunToLedgerRun(run),
+    );
   }
   if (activeRun && !byId.has(activeRun.id)) {
     byId.set(activeRun.id, liveRunToLedgerRun(activeRun));

@@ -94,33 +94,13 @@ export function ClickUpAgentRefConfigFields(props: AdapterConfigFieldsProps) {
         />
       </Field>
 
-      <Field label="ClickUp agent name">
-        <DraftInput
-          value={readSchemaValue(props, "clickupAgentName")}
-          onCommit={(value) => writeSchemaValue(props, "clickupAgentName", value)}
-          immediate
-          className={inputClass}
-          placeholder="Customer Support Triage Agent"
-        />
-      </Field>
-
-      <Field label="ClickUp agent user ID">
+      <Field label="Bridge bot user ID (ClickUp user ID)">
         <DraftInput
           value={readSchemaValue(props, "clickupAgentUserId")}
           onCommit={(value) => writeSchemaValue(props, "clickupAgentUserId", value)}
           immediate
           className={inputClass}
           placeholder="123456"
-        />
-      </Field>
-
-      <Field label="ClickUp agent URL">
-        <DraftInput
-          value={readSchemaValue(props, "clickupAgentUrl")}
-          onCommit={(value) => writeSchemaValue(props, "clickupAgentUrl", value)}
-          immediate
-          className={inputClass}
-          placeholder="https://app.clickup.com/..."
         />
       </Field>
 
@@ -171,16 +151,6 @@ export function ClickUpAgentRefConfigFields(props: AdapterConfigFieldsProps) {
           immediate
           className={inputClass}
           placeholder="Optional future chat routing target"
-        />
-      </Field>
-
-      <Field label="API base URL">
-        <DraftInput
-          value={readSchemaValue(props, "apiBaseUrl")}
-          onCommit={(value) => writeSchemaValue(props, "apiBaseUrl", value)}
-          immediate
-          className={inputClass}
-          placeholder="https://api.clickup.com/api/v2"
         />
       </Field>
 

@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { Issue, IssueWorkProduct, RunLivenessState } from "@paperclipai/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunForIssue } from "../api/activity";
+import type { LiveRunForIssue } from "../api/heartbeats";
 import { IssueRunLedgerContent } from "./IssueRunLedger";
 
 vi.mock("@/lib/router", () => ({
@@ -113,6 +114,28 @@ function renderLedger(props: Partial<ComponentProps<typeof IssueRunLedgerContent
   );
 }
 
+function createLiveRun(overrides: Partial<LiveRunForIssue> = {}): LiveRunForIssue {
+  return {
+    id: "run-00000000",
+    status: "running",
+    invocationSource: "assignment",
+    triggerDetail: "clickup_bridge_polling",
+    startedAt: "2026-04-18T19:58:00.000Z",
+    finishedAt: null,
+    createdAt: "2026-04-18T19:58:00.000Z",
+    agentId: "agent-1",
+    agentName: "CodexCoder",
+    adapterType: "clickup_agent_ref",
+    issueId: "issue-1",
+    livenessState: null,
+    livenessReason: "ClickUp bridge is polling for external replies.",
+    continuationAttempt: 0,
+    lastUsefulActionAt: "2026-04-18T19:59:30.000Z",
+    nextAction: "Polling ClickUp for external replies.",
+    ...overrides,
+  };
+}
+
 describe("IssueRunLedger", () => {
   it("renders every liveness state with exhausted continuation context", () => {
     const states: RunLivenessState[] = [
@@ -191,6 +214,35 @@ describe("IssueRunLedger", () => {
     expect(container.textContent).toContain("Stop Still running");
     expect(container.textContent).not.toContain("Liveness pending");
     expect(container.textContent).not.toContain("initial attempt");
+  });
+
+  it("prefers live run state over historical status for the same run id", () => {
+    renderLedger({
+      runs: [
+        createRun({
+          runId: "run-clickup",
+          status: "succeeded",
+          adapterType: "clickup_agent_ref",
+          livenessState: null,
+          livenessReason: null,
+          lastUsefulActionAt: null,
+          nextAction: null,
+          resultJson: { status: "pending_external", pollingActive: true },
+        }),
+      ],
+      liveRuns: [
+        createLiveRun({
+          id: "run-clickup",
+          adapterType: "clickup_agent_ref",
+        }),
+      ],
+    });
+
+    expect(container.textContent).toContain("Running now by CodexCoder");
+    expect(container.textContent).toContain("live");
+    expect(container.textContent).toContain("Checks after finish");
+    expect(container.textContent).toContain("Stop Still running");
+    expect(container.textContent).toContain("Polling ClickUp for external replies.");
   });
 
   it("surfaces scheduled retry timing and exhaustion state without opening logs", () => {

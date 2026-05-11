@@ -3,6 +3,7 @@ import type { AdapterSessionCodec } from "@paperclipai/adapter-utils";
 export { execute } from "./execute.js";
 export { testEnvironment } from "./test.js";
 export { parseClickUpCommentResponse, parseClickUpTaskResponse } from "./parse.js";
+export { buildClickUpContextBody } from "./body.js";
 
 export const sessionCodec: AdapterSessionCodec = {
   deserialize(raw) {

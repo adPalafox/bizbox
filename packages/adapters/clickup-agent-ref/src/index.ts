@@ -22,10 +22,7 @@ Core fields:
 - listId (string, required): ClickUp list id where Bizbox issues should be materialized as tasks.
 
 Optional fields:
-- apiBaseUrl (string, optional): OpenAPI base URL override. Default: https://api.clickup.com/api/v2
-- clickupAgentName (string, optional): human label for the external ClickUp agent or automation owner
 - clickupAgentUserId (number, optional): ClickUp user id to assign on task creation and @mention in task comments
-- clickupAgentUrl (string, optional): deep link to the ClickUp agent/task/chat configuration
 - triggerMode (string, optional): api_comment_only (default) or automation_trigger.
 - automationStatus (string, optional): task status to set so a ClickUp Automation can trigger the Super Agent.
 - automationTags (array|string, optional): tags to set on the task so a ClickUp Automation can trigger the Super Agent.

@@ -20,17 +20,11 @@ export function buildClickUpAgentRefConfig(v: CreateConfigValues): Record<string
   if (typeof adapterSchemaValues.channelId === "string" && adapterSchemaValues.channelId.trim()) {
     config.channelId = adapterSchemaValues.channelId.trim();
   }
-  if (typeof adapterSchemaValues.clickupAgentName === "string" && adapterSchemaValues.clickupAgentName.trim()) {
-    config.clickupAgentName = adapterSchemaValues.clickupAgentName.trim();
-  }
   if (
     (typeof adapterSchemaValues.clickupAgentUserId === "number" && Number.isFinite(adapterSchemaValues.clickupAgentUserId)) ||
     (typeof adapterSchemaValues.clickupAgentUserId === "string" && adapterSchemaValues.clickupAgentUserId.trim())
   ) {
     config.clickupAgentUserId = adapterSchemaValues.clickupAgentUserId;
-  }
-  if (typeof adapterSchemaValues.clickupAgentUrl === "string" && adapterSchemaValues.clickupAgentUrl.trim()) {
-    config.clickupAgentUrl = adapterSchemaValues.clickupAgentUrl.trim();
   }
   if (typeof adapterSchemaValues.triggerMode === "string" && adapterSchemaValues.triggerMode.trim()) {
     config.triggerMode = adapterSchemaValues.triggerMode.trim();
@@ -43,9 +37,6 @@ export function buildClickUpAgentRefConfig(v: CreateConfigValues): Record<string
       .split(",")
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0);
-  }
-  if (typeof adapterSchemaValues.apiBaseUrl === "string" && adapterSchemaValues.apiBaseUrl.trim()) {
-    config.apiBaseUrl = adapterSchemaValues.apiBaseUrl.trim();
   }
 
   return config;
