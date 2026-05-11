@@ -48,8 +48,13 @@ describe("isUserCommentForImport", () => {
   });
 
   it("does not filter agent replies when bridge bot id is absent", () => {
-    const res = isUserCommentForImport({ id: "c3", comment_text: "reply", user: { id: -16805283 }, date: "300" }, null);
+    const res = isUserCommentForImport({ id: "c3", comment_text: "reply", user: { id: -16805283 }, date: "300" }, null, -16805283);
     expect(res).toEqual({ id: "c3", text: "reply", createdAt: 300 });
+  });
+
+  it("filters non-agent comments when bridge bot id is absent", () => {
+    const res = isUserCommentForImport({ id: "c4", comment_text: "loopback", user: { id: 42 }, date: "400" }, null, -16805283);
+    expect(res).toBeNull();
   });
 });
 
@@ -1498,6 +1503,93 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
       "https://api.clickup.com/api/v2/task/task-1/comment",
       "https://api.clickup.com/api/v2/task/task-1",
     ]);
+  });
+
+  it("creates automation trigger tasks with status tags and assignee", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body && typeof init.body === "string"
+        ? JSON.parse(init.body)
+        : {};
+      requests.push({ url, body });
+      if (url.endsWith("/list/list-1/task")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ id: "task-1", url: "https://app.clickup.com/t/task-1" }),
+        };
+      }
+      if (url.endsWith("/task/task-1/comment")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ id: "comment-1" }),
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Automation ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+        clickupAgentUserId: -16805283,
+        triggerMode: "automation_trigger",
+        automationStatus: "ai_intake",
+        automationTags: ["bizbox", "triage"],
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const [bridge] = await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: randomUUID(),
+      taskKey: "issue:automation-create",
+      clickupListId: "list-1",
+      status: "pending_clickup_task",
+      mode: "automation_trigger",
+      nextPollAt: new Date(),
+    }).returning();
+
+    await db.insert(clickupOutboundEvents).values({
+      bridgeId: bridge!.id,
+      kind: "create_task",
+      status: "pending",
+      payload: { body: "hello", taskName: "Automation task" },
+    });
+
+    await clickupBridgeService(db).processOutbound();
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.body).toEqual(expect.objectContaining({
+      name: "Automation task",
+      description: "hello",
+      status: "ai_intake",
+      tags: ["bizbox", "triage"],
+      assignees: [-16805283],
+      notify_all: false,
+    }));
   });
 
   it("requeues stale processing events before selecting new outbound work", async () => {

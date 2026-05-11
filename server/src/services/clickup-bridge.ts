@@ -47,7 +47,9 @@ function resolveConfig(config: Record<string, unknown>): {
   authToken: string;
   bridgeBotUserId: string | null;
   clickupAgentName?: string;
+  clickupAgentUserId: number | null;
   clickupAgentUrl?: string;
+  automationTags: string[];
   includeContextJson: boolean;
   mode: TriggerMode;
   statusToTriggerAgent: string | null;
@@ -59,7 +61,32 @@ function resolveConfig(config: Record<string, unknown>): {
   const authToken = asString(parsed.authToken);
   const bridgeBotUserId = asScalarString(parsed.bridgeBotUserId) || null;
   const clickupAgentName = asString(parsed.clickupAgentName) || undefined;
+  const clickupAgentUserId = (() => {
+    const value = parsed.clickupAgentUserId;
+    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsedId = Number.parseInt(value.trim(), 10);
+      if (Number.isFinite(parsedId)) return parsedId;
+    }
+    return null;
+  })();
   const clickupAgentUrl = asString(parsed.clickupAgentUrl) || undefined;
+  const automationTags = (() => {
+    const value = parsed.automationTags;
+    if (Array.isArray(value)) {
+      return value
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    }
+    return [];
+  })();
   const includeContextJson = parsed.includeContextJson !== false;
   const mode: TriggerMode = asString(parsed.triggerMode) === "automation_trigger" ? "automation_trigger" : "api_comment_only";
   const statusToTriggerAgent = asString(parsed.statusToTriggerAgent) || asString(parsed.automationStatus) || null;
@@ -73,7 +100,9 @@ function resolveConfig(config: Record<string, unknown>): {
     authToken,
     bridgeBotUserId,
     clickupAgentName,
+    clickupAgentUserId,
     clickupAgentUrl,
+    automationTags,
     includeContextJson,
     mode,
     statusToTriggerAgent,
@@ -159,7 +188,17 @@ function buildTaskName(context: Record<string, unknown>, taskKey: string): strin
   return title || identifier || taskKey;
 }
 
-export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string | null): { id: string; text: string; createdAt: number } | null {
+function buildTaskFields(body: string, cfg: ReturnType<typeof resolveConfig>): Record<string, unknown> {
+  const fields: Record<string, unknown> = {
+    description: body,
+  };
+  if (cfg.mode !== "automation_trigger") return fields;
+  if (cfg.statusToTriggerAgent) fields.status = cfg.statusToTriggerAgent;
+  if (cfg.automationTags.length > 0) fields.tags = cfg.automationTags;
+  return fields;
+}
+
+export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string | null, clickupAgentUserId: number | null = null): { id: string; text: string; createdAt: number } | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
   const id = asScalarString(row.id);
@@ -170,6 +209,10 @@ export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string | n
   const createdAt = Number(asScalarString(row.date) || 0);
   if (!id || !text || !authorId) return null;
   if (bridgeBotUserId && authorId === bridgeBotUserId) return null;
+  if (!bridgeBotUserId) {
+    const configuredAgentUserId = clickupAgentUserId == null ? "" : String(clickupAgentUserId);
+    if (!configuredAgentUserId || authorId !== configuredAgentUserId) return null;
+  }
   if (isSystem) return null;
   return { id, text, createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now() };
 }
@@ -346,7 +389,16 @@ export function clickupBridgeService(db: Db) {
           if (!bridge.clickupTaskId) {
             const res = await clickupRequest(
               `${cfg.apiBaseUrl}/list/${cfg.listId}/task`,
-              { method: "POST", headers, body: JSON.stringify({ name: taskName, description: body, notify_all: false }) },
+              {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                  name: taskName,
+                  notify_all: false,
+                  ...(cfg.clickupAgentUserId != null ? { assignees: [cfg.clickupAgentUserId] } : {}),
+                  ...buildTaskFields(body, cfg),
+                }),
+              },
               cfg.timeoutSec,
             );
             if (!res.ok) throw new Error(`clickup create task failed: ${res.status}`);
@@ -508,7 +560,7 @@ export function clickupBridgeService(db: Db) {
 
           const candidatesById = new Map<string, { id: string; text: string; createdAt: number }>();
           for (const item of [...comments, ...replyRows]
-            .map((c) => isUserCommentForImport(c, cfg.bridgeBotUserId))
+            .map((c) => isUserCommentForImport(c, cfg.bridgeBotUserId, cfg.clickupAgentUserId))
             .filter((c): c is { id: string; text: string; createdAt: number } => c !== null)
             .filter((c) => !imported.has(c.id))) {
             const existing = candidatesById.get(item.id);
