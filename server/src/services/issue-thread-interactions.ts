@@ -35,6 +35,7 @@ import {
   suggestTasksResultSchema,
 } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
+import { maybeLogAwaitingHumanHandoff } from "./awaiting-human-handoff.js";
 import { issueService } from "./issues.js";
 
 type InteractionActor = {
@@ -60,6 +61,15 @@ type ResolvedInteractionResult = {
 
 type IssueThreadInteractionRow = typeof issueThreadInteractions.$inferSelect;
 type IssueTouchDb = Pick<Db, "update">;
+type AwaitingHumanCreateInteraction = Extract<
+  CreateIssueThreadInteraction,
+  { kind: "ask_user_questions" | "request_confirmation" }
+>;
+type AwaitingHumanInteractionKind = AwaitingHumanCreateInteraction["kind"];
+type AwaitingHumanInteractionForKind<TKind extends AwaitingHumanInteractionKind> =
+  TKind extends "ask_user_questions"
+    ? Pick<AskUserQuestionsInteraction, "id" | "kind" | "title" | "summary" | "payload">
+    : Pick<RequestConfirmationInteraction, "id" | "kind" | "title" | "summary" | "payload">;
 
 type IssueResolutionContext = {
   id: string;
@@ -130,6 +140,19 @@ function hydrateInteraction(
     default:
       throw unprocessable(`Unknown interaction kind: ${row.kind}`);
   }
+}
+
+function buildAwaitingHumanInteraction<TKind extends AwaitingHumanInteractionKind>(
+  id: string,
+  data: Extract<AwaitingHumanCreateInteraction, { kind: TKind }>,
+): AwaitingHumanInteractionForKind<TKind> {
+  return {
+    id,
+    kind: data.kind,
+    title: data.title ?? null,
+    summary: data.summary ?? null,
+    payload: data.payload,
+  } as AwaitingHumanInteractionForKind<TKind>;
 }
 
 async function touchIssue(db: IssueTouchDb, issueId: string) {
@@ -760,16 +783,41 @@ export function issueThreadInteractionService(db: Db) {
         && (data.kind === "ask_user_questions" || data.kind === "request_confirmation")
       ) {
         const currentIssueRow = await db
-          .select({ status: issues.status })
+          .select({
+            id: issues.id,
+            companyId: issues.companyId,
+            identifier: issues.identifier,
+            title: issues.title,
+            status: issues.status,
+            updatedAt: issues.updatedAt,
+            assigneeAgentId: issues.assigneeAgentId,
+            assigneeUserId: issues.assigneeUserId,
+          })
           .from(issues)
           .where(eq(issues.id, issue.id))
           .then((rows) => rows[0] ?? null);
         if (currentIssueRow && currentIssueRow.status === "in_progress") {
-          await issueService(db).update(issue.id, {
+          const updatedIssue = await issueService(db).update(issue.id, {
             status: "awaiting_human",
             actorAgentId: actor.agentId,
             actorUserId: actor.userId ?? null,
           });
+          if (updatedIssue) {
+            await maybeLogAwaitingHumanHandoff(db, {
+              previousIssue: currentIssueRow,
+              updatedIssue,
+              source: "issue_thread_interactions.create_auto_park",
+              handoffKind: data.kind,
+              interaction: buildAwaitingHumanInteraction(created.id, data),
+              actor: {
+                actorType: actor.userId ? "user" : actor.agentId ? "agent" : "system",
+                actorId: actor.userId ?? actor.agentId ?? "system",
+                agentId: actor.agentId ?? null,
+                userId: actor.userId ?? null,
+              },
+              emitIssueUpdatedActivity: true,
+            });
+          }
         }
       }
 
