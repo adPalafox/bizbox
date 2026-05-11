@@ -56,6 +56,16 @@ describe("isUserCommentForImport", () => {
     const res = isUserCommentForImport({ id: "c4", comment_text: "loopback", user: { id: 42 }, date: "400" }, null, -16805283);
     expect(res).toBeNull();
   });
+
+  it("filters non-agent comments when bot id and agent id are both configured", () => {
+    const res = isUserCommentForImport({ id: "c5", comment_text: "human reply", user: { id: 42 }, date: "500" }, "bot-1", -16805283);
+    expect(res).toBeNull();
+  });
+
+  it("accepts configured agent comments when bot id and agent id are both configured", () => {
+    const res = isUserCommentForImport({ id: "c6", comment_text: "agent reply", user: { id: -16805283 }, date: "600" }, "bot-1", -16805283);
+    expect(res).toEqual({ id: "c6", text: "agent reply", createdAt: 600 });
+  });
 });
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();

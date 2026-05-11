@@ -209,10 +209,7 @@ export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string | n
   const createdAt = Number(asScalarString(row.date) || 0);
   if (!id || !text || !authorId) return null;
   if (bridgeBotUserId && authorId === bridgeBotUserId) return null;
-  if (!bridgeBotUserId) {
-    const configuredAgentUserId = clickupAgentUserId == null ? "" : String(clickupAgentUserId);
-    if (!configuredAgentUserId || authorId !== configuredAgentUserId) return null;
-  }
+  if (clickupAgentUserId != null && authorId !== String(clickupAgentUserId)) return null;
   if (isSystem) return null;
   return { id, text, createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now() };
 }
