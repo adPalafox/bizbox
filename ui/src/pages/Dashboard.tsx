@@ -340,7 +340,7 @@ export function Dashboard() {
                     </Badge>
                   ) : (
 
-                    <Badge variant="outline" className="inline-flex items-ts  gap-1 uppercase px-3 py-1.5 text-emerald-700 dark:text-emerald-200 border-emerald-500/20 bg-emerald-500/10">
+                    <Badge variant="outline" className="inline-flex items-center gap-1 uppercase px-3 py-1.5 text-emerald-700 dark:text-emerald-200 border-emerald-500/20 bg-emerald-500/10">
                       Company healthy
                     </Badge>
                   )}
