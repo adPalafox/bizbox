@@ -151,10 +151,12 @@ export function BreadcrumbBar() {
     </div>
   );
 
-  const showBreadcrumbs = !(
-    breadcrumbs.length === 1 &&
-    TOP_LEVEL_BREADCRUMB_LABELS.has(breadcrumbs[0]?.label ?? "")
-  );
+  const showBreadcrumbs =
+    breadcrumbs.length > 0 &&
+    !(
+      breadcrumbs.length === 1 &&
+      TOP_LEVEL_BREADCRUMB_LABELS.has(breadcrumbs[0]?.label ?? "")
+    );
 
   return (
     <div className="brand-shell flex h-16 shrink-0 items-center gap-3 border-b border-border/70 px-4 md:px-6">
