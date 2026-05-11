@@ -7,17 +7,27 @@ export { isOpenAiAgentUnknownSessionError, parseOpenAiAgentResponse } from "./pa
 export const sessionCodec: AdapterSessionCodec = {
   deserialize(raw) {
     if (!raw || typeof raw !== "object") return null;
+    const record = raw as Record<string, unknown>;
     const previousResponseId =
-      typeof (raw as { previousResponseId?: unknown }).previousResponseId === "string"
-        ? (raw as { previousResponseId: string }).previousResponseId.trim()
+      typeof record.previousResponseId === "string"
+        ? record.previousResponseId.trim()
         : "";
-    return previousResponseId ? { previousResponseId } : null;
+    if (!previousResponseId) return null;
+
+    const session: Record<string, unknown> = { previousResponseId };
+    for (const key of ["promptTemplate", "workflowInstruction", "model", "apiBaseUrl"] as const) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        session[key] = value.trim();
+      }
+    }
+    if (typeof record.includeContextJson === "boolean") {
+      session.includeContextJson = record.includeContextJson;
+    }
+    return session;
   },
   serialize(params) {
-    if (!params || typeof params !== "object") return null;
-    const previousResponseId =
-      typeof params.previousResponseId === "string" ? params.previousResponseId.trim() : "";
-    return previousResponseId ? { previousResponseId } : null;
+    return this.deserialize(params);
   },
   getDisplayId(params) {
     if (!params || typeof params !== "object") return null;

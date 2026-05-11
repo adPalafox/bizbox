@@ -38,10 +38,31 @@ describe("openai_agent parse", () => {
 });
 
 describe("openai_agent sessionCodec", () => {
-  it("round-trips previousResponseId", () => {
-    const serialized = sessionCodec.serialize({ previousResponseId: "resp_123" });
-    expect(serialized).toEqual({ previousResponseId: "resp_123" });
-    expect(sessionCodec.deserialize(serialized)).toEqual({ previousResponseId: "resp_123" });
+  it("round-trips previousResponseId and session compatibility metadata", () => {
+    const serialized = sessionCodec.serialize({
+      previousResponseId: "resp_123",
+      promptTemplate: "Hello {{context.issueId}}",
+      workflowInstruction: "Be precise.",
+      model: "gpt-5",
+      apiBaseUrl: "https://api.openai.com/v1",
+      includeContextJson: true,
+    });
+    expect(serialized).toEqual({
+      previousResponseId: "resp_123",
+      promptTemplate: "Hello {{context.issueId}}",
+      workflowInstruction: "Be precise.",
+      model: "gpt-5",
+      apiBaseUrl: "https://api.openai.com/v1",
+      includeContextJson: true,
+    });
+    expect(sessionCodec.deserialize(serialized)).toEqual({
+      previousResponseId: "resp_123",
+      promptTemplate: "Hello {{context.issueId}}",
+      workflowInstruction: "Be precise.",
+      model: "gpt-5",
+      apiBaseUrl: "https://api.openai.com/v1",
+      includeContextJson: true,
+    });
     expect(sessionCodec.getDisplayId?.(serialized)).toBe("resp_123");
   });
 });

@@ -2,7 +2,13 @@ import type {
   AdapterExecutionContext,
   AdapterExecutionResult,
 } from "@paperclipai/adapter-utils";
-import { asNumber, asString, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import {
+  asNumber,
+  asString,
+  parseObject,
+  renderTemplate,
+  DEFAULT_BIZBOX_AGENT_PROMPT_TEMPLATE,
+} from "@paperclipai/adapter-utils/server-utils";
 import { isOpenAiAgentUnknownSessionError, parseOpenAiAgentResponse } from "./parse.js";
 import { DEFAULT_OPENAI_MODEL } from "../index.js";
 
@@ -10,6 +16,7 @@ type OpenAiAgentConfig = {
   apiBaseUrl: string;
   authToken: string;
   model: string;
+  promptTemplate: string;
   reasoningEffort?: "low" | "medium" | "high";
   workflowInstruction?: string;
   studioUrl?: string;
@@ -56,6 +63,7 @@ function resolveConfig(ctx: AdapterExecutionContext): OpenAiAgentConfig {
     apiBaseUrl: normalizeBaseUrl(asString(raw.apiBaseUrl, "https://api.openai.com/v1")),
     authToken,
     model: asString(raw.model, DEFAULT_OPENAI_MODEL).trim() || DEFAULT_OPENAI_MODEL,
+    promptTemplate: asString(raw.promptTemplate, DEFAULT_BIZBOX_AGENT_PROMPT_TEMPLATE).trim() || DEFAULT_BIZBOX_AGENT_PROMPT_TEMPLATE,
     reasoningEffort,
     workflowInstruction: asString(raw.workflowInstruction, "").trim() || undefined,
     studioUrl: asString(raw.studioUrl, "").trim() || undefined,
@@ -72,17 +80,59 @@ function readPreviousResponseId(ctx: AdapterExecutionContext): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function readSessionCompatibility(ctx: AdapterExecutionContext) {
+  const session = parseObject(ctx.runtime.sessionParams);
+  return {
+    promptTemplate: asString(session.promptTemplate, "").trim(),
+    workflowInstruction: asString(session.workflowInstruction, "").trim(),
+    model: asString(session.model, "").trim(),
+    apiBaseUrl: asString(session.apiBaseUrl, "").trim(),
+    includeContextJson: typeof session.includeContextJson === "boolean" ? session.includeContextJson : null,
+  };
+}
+
+function buildSessionCompatibility(config: OpenAiAgentConfig) {
+  return {
+    promptTemplate: config.promptTemplate,
+    workflowInstruction: config.workflowInstruction ?? "",
+    model: config.model,
+    apiBaseUrl: config.apiBaseUrl,
+    includeContextJson: config.includeContextJson,
+  };
+}
+
+function canResumeSession(
+  previousResponseId: string | null,
+  saved: ReturnType<typeof readSessionCompatibility>,
+  current: ReturnType<typeof buildSessionCompatibility>,
+) {
+  if (!previousResponseId) return false;
+  return (
+    saved.promptTemplate === current.promptTemplate &&
+    saved.workflowInstruction === current.workflowInstruction &&
+    saved.model === current.model &&
+    saved.apiBaseUrl === current.apiBaseUrl &&
+    saved.includeContextJson === current.includeContextJson
+  );
+}
+
 function buildPrompt(ctx: AdapterExecutionContext, config: OpenAiAgentConfig): string {
   const sections: string[] = [];
   if (config.workflowInstruction) {
     sections.push(`Workflow instruction:\n${config.workflowInstruction}`);
   }
 
-  const rawContext = parseObject(ctx.context);
-  const promptFields = [rawContext.prompt, rawContext.instructions, rawContext.wakeText]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-  if (promptFields.length > 0) {
-    sections.push(promptFields.join("\n\n"));
+  const renderedPrompt = renderTemplate(config.promptTemplate, {
+    agentId: ctx.agent.id,
+    companyId: ctx.agent.companyId,
+    runId: ctx.runId,
+    company: { id: ctx.agent.companyId },
+    agent: ctx.agent,
+    run: { id: ctx.runId, source: "on_demand" },
+    context: ctx.context,
+  }).trim();
+  if (renderedPrompt) {
+    sections.push(renderedPrompt);
   }
 
   if (config.includeContextJson) {
@@ -150,7 +200,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
 
   const prompt = buildPrompt(ctx, config);
-  const previousResponseId = readPreviousResponseId(ctx);
+  const savedPreviousResponseId = readPreviousResponseId(ctx);
+  const savedCompatibility = readSessionCompatibility(ctx);
+  const currentCompatibility = buildSessionCompatibility(config);
+  const previousResponseId = canResumeSession(savedPreviousResponseId, savedCompatibility, currentCompatibility)
+    ? savedPreviousResponseId
+    : null;
+  if (savedPreviousResponseId && !previousResponseId) {
+    await ctx.onLog(
+      "stdout",
+      `[openai-agent] previous_response_id session is incompatible with current prompt/config and will not be resumed\n`,
+    );
+  }
   if (config.studioUrl) {
     await ctx.onLog("stdout", `[openai-agent] studio=${config.studioUrl}\n`);
   }
@@ -235,7 +296,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       billingType: "metered_api",
       model: config.model,
       sessionParams: parsed.responseId
-        ? { previousResponseId: parsed.responseId }
+        ? {
+            previousResponseId: parsed.responseId,
+            ...currentCompatibility,
+          }
         : ctx.runtime.sessionParams,
       sessionDisplayId: parsed.responseId,
       resultJson: parsed.responseId ? { responseId: parsed.responseId } : null,

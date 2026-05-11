@@ -75,12 +75,12 @@ function resolveConfig(ctx: AdapterExecutionContext): ClickUpAgentRefConfig {
     clickupAgentName: asString(raw.clickupAgentName, "").trim() || undefined,
     clickupAgentUserId: (() => {
       const value = raw.clickupAgentUserId;
-      if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      if (typeof value === "number" && Number.isFinite(value)) {
         return Math.trunc(value);
       }
       if (typeof value === "string" && value.trim().length > 0) {
         const parsed = Number.parseInt(value.trim(), 10);
-        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+        if (Number.isFinite(parsed)) return parsed;
       }
       return undefined;
     })(),
@@ -531,8 +531,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       };
     }
 
-    const summary = `Updated ClickUp task ${existingTaskId}${config.clickupAgentName ? ` for ${config.clickupAgentName}` : ""}.`;
-    await syncTaskDetails(ctx, config, headers, existingTaskId, body);
+    let summary = `Updated ClickUp task ${existingTaskId}${config.clickupAgentName ? ` for ${config.clickupAgentName}` : ""}.`;
+    try {
+      await syncTaskDetails(ctx, config, headers, existingTaskId, body);
+    } catch (err) {
+      const syncErrorMessage = err instanceof Error ? err.message : String(err);
+      await ctx.onLog("stderr", `[clickup-agent-ref] WARN: failed to sync task details: ${syncErrorMessage}\n`);
+      summary += " Task detail sync failed; comment still posted.";
+    }
     await ctx.onLog("stdout", `${summary}\n`);
     return {
       exitCode: 0,

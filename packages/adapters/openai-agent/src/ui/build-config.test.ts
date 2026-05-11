@@ -7,7 +7,7 @@ describe("buildOpenAiAgentConfig", () => {
     const config = buildOpenAiAgentConfig({
       adapterType: "openai_agent",
       cwd: "",
-      promptTemplate: "",
+      promptTemplate: "Follow {{context.issueId}} carefully.",
       model: "",
       thinkingEffort: "",
       chrome: false,
@@ -37,6 +37,7 @@ describe("buildOpenAiAgentConfig", () => {
 
     expect(config).toMatchObject({
       authToken: "sk-test",
+      promptTemplate: "Follow {{context.issueId}} carefully.",
       model: DEFAULT_OPENAI_MODEL,
       workflowInstruction: "Review the issue and respond.",
       reasoningEffort: "medium",

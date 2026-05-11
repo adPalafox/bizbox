@@ -29,6 +29,7 @@ Core fields:
 
 Optional fields:
 - apiBaseUrl (string, optional): override the OpenAI-compatible API base. Default: https://api.openai.com/v1
+- promptTemplate (string, optional): Bizbox heartbeat prompt template. Defaults to the shared Bizbox execution contract prompt.
 - reasoningEffort (string, optional): low, medium, or high for reasoning-capable models
 - workflowInstruction (string, optional): stable system instruction prepended to each run
 - studioUrl (string, optional): human reference link to a related ChatGPT Agent Studio page
@@ -38,6 +39,7 @@ Optional fields:
 
 Session behavior:
 - The adapter stores the previous response id when available and passes it back as previous_response_id on later runs.
+- Bizbox only reuses a stored previous response id when the prompt/instruction envelope still matches the saved session metadata.
 - This keeps issue-scoped or agent-scoped OpenAI conversations resumable without requiring a local session store.
 
 Security notes:

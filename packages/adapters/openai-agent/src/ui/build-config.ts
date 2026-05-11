@@ -4,6 +4,7 @@ import { DEFAULT_OPENAI_MODEL } from "../index.js";
 export function buildOpenAiAgentConfig(v: CreateConfigValues): Record<string, unknown> {
   const adapterSchemaValues = v.adapterSchemaValues ?? {};
   const config: Record<string, unknown> = {
+    promptTemplate: v.promptTemplate.trim(),
     model:
       typeof adapterSchemaValues.model === "string" && adapterSchemaValues.model.trim().length > 0
         ? adapterSchemaValues.model.trim()
@@ -14,6 +15,9 @@ export function buildOpenAiAgentConfig(v: CreateConfigValues): Record<string, un
         : v.timeoutSec ?? 600,
     includeContextJson: adapterSchemaValues.includeContextJson !== false,
   };
+  if (!config.promptTemplate) {
+    delete config.promptTemplate;
+  }
 
   if (v.apiKey?.trim()) config.authToken = v.apiKey.trim();
   if (typeof adapterSchemaValues.apiBaseUrl === "string" && adapterSchemaValues.apiBaseUrl.trim()) {

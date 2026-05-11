@@ -255,6 +255,88 @@ describe("clickup_agent_ref execute", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it("keeps negative ClickUp user ids for agent tagging", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ comments: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "comment_123" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "task_123" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const result = await execute(
+      makeContext(
+        {
+          authToken: "token",
+          workspaceId: "team_1",
+          listId: "list_1",
+          clickupAgentName: "Risk Witherspoon",
+          clickupAgentUserId: -16805283,
+        },
+        { clickupTaskId: "task_123" },
+      ),
+    );
+
+    const payload = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(payload.assignee).toBe(-16805283);
+    expect(payload.comment?.[1]).toEqual({ type: "tag", user: { id: -16805283 } });
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("keeps comment sync state when task detail sync fails", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ comments: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "comment_123" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("sync failed", {
+          status: 500,
+          statusText: "Server Error",
+          headers: { "Content-Type": "text/plain" },
+        }),
+      );
+
+    const result = await execute(
+      makeContext(
+        {
+          authToken: "token",
+          workspaceId: "team_1",
+          listId: "list_1",
+          clickupAgentName: "Risk Witherspoon",
+        },
+        { clickupTaskId: "task_123", syncedClickupCommentIds: ["already_seen"] },
+      ),
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.summary).toContain("Task detail sync failed; comment still posted.");
+    expect(result.sessionParams).toMatchObject({
+      clickupTaskId: "task_123",
+      syncedClickupCommentIds: ["already_seen"],
+    });
+  });
+
   it("updates the task with automation status and tags after commenting in automation_trigger mode", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

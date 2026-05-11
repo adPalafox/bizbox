@@ -7430,32 +7430,35 @@ export function heartbeatService(db: Db) {
     return wakeupIds.length;
   }
 
+  async function closeClickUpBridgeForRun(
+    runRecord: Pick<typeof heartbeatRuns.$inferSelect, "resultJson">,
+    reason: string,
+  ) {
+    const result = parseObject(runRecord.resultJson);
+    const clickupBridgeId = typeof result?.clickupBridgeId === "string" ? result.clickupBridgeId : null;
+    if (!clickupBridgeId) return;
+
+    await db
+      .update(clickupBridges)
+      .set({
+        status: "closed",
+        nextPollAt: null,
+        lastError: reason,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(clickupBridges.id, clickupBridgeId),
+          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+        ),
+      );
+  }
+
   async function cancelRunInternal(runId: string, reason = "Cancelled by control plane") {
-    async function closeClickUpBridgeForRun(runRecord: Pick<typeof heartbeatRuns.$inferSelect, "resultJson">) {
-      const result = parseObject(runRecord.resultJson);
-      const clickupBridgeId = typeof result?.clickupBridgeId === "string" ? result.clickupBridgeId : null;
-      if (!clickupBridgeId) return;
-
-      await db
-        .update(clickupBridges)
-        .set({
-          status: "closed",
-          nextPollAt: null,
-          lastError: reason,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(clickupBridges.id, clickupBridgeId),
-            inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
-          ),
-        );
-    }
-
     const run = await getRun(runId);
     if (!run) throw notFound("Heartbeat run not found");
     if (!CANCELLABLE_HEARTBEAT_RUN_STATUSES.includes(run.status as (typeof CANCELLABLE_HEARTBEAT_RUN_STATUSES)[number])) {
-      await closeClickUpBridgeForRun(run);
+      await closeClickUpBridgeForRun(run, reason);
       return run;
     }
     const agent = await getAgent(run.agentId);
@@ -7493,7 +7496,7 @@ export function heartbeatService(db: Db) {
     });
 
     if (cancelled) {
-      await closeClickUpBridgeForRun(cancelled);
+      await closeClickUpBridgeForRun(cancelled, reason);
       await appendRunEvent(cancelled, 1, {
         eventType: "lifecycle",
         stream: "system",
@@ -7530,7 +7533,7 @@ export function heartbeatService(db: Db) {
         } : {}),
       });
       if (cancelled) {
-        await closeClickUpBridgeForRun(cancelled);
+        await closeClickUpBridgeForRun(cancelled, reason);
       }
 
       await setWakeupStatus(run.wakeupRequestId, "cancelled", {

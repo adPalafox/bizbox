@@ -81,6 +81,20 @@ export function OpenAiAgentConfigFields(props: AdapterConfigFieldsProps) {
         />
       </Field>
 
+      <Field label="Prompt template">
+        <DraftInput
+          value={props.isCreate ? props.values?.promptTemplate ?? "" : props.eff("adapterConfig", "promptTemplate", "")}
+          onCommit={(value) =>
+            props.isCreate
+              ? props.set?.({ promptTemplate: value })
+              : props.mark("adapterConfig", "promptTemplate", value || undefined)
+          }
+          immediate
+          className={inputClass}
+          placeholder="Optional Bizbox prompt template override"
+        />
+      </Field>
+
       <Field label="Workflow instruction">
         <DraftInput
           value={readSchemaValue(props, "workflowInstruction")}
