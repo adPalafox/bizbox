@@ -181,7 +181,7 @@ const statusColors: Record<string, string> = {
   done: "var(--chart-4)",
   blocked: "var(--chart-5)",
   cancelled: "var(--muted-foreground)",
-  backlog: "color-mix(in oklab, var(--muted-foreground) 78%, var(--background))",
+  backlog: "var(--muted-foreground)",
 };
 
 const statusLabels: Record<string, string> = {
