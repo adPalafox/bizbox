@@ -31,8 +31,8 @@ type GlobalToolbarContext = {
 };
 
 const TOP_NAV_ITEMS = [
-  { to: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { to: "/issues", label: "Work", icon: CircleDot },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/issues", label: "Issues", icon: CircleDot },
   { to: "/agents/all", label: "Agents", icon: Users },
   { to: "/approvals/pending", label: "Approvals", icon: ShieldCheck },
   { to: "/inbox", label: "Inbox", icon: BellRing },
@@ -127,8 +127,9 @@ export function BreadcrumbBar() {
 
   if (isMobile && mobileToolbar) {
     return (
-      <div className="brand-shell flex h-14 shrink-0 items-center border-b border-border/70 px-2">
-        {mobileToolbar}
+      <div className="brand-shell flex h-14 shrink-0 items-center gap-2 border-b border-border/70 px-2">
+        <div className="min-w-0 flex-1">{mobileToolbar}</div>
+        {searchButton}
       </div>
     );
   }

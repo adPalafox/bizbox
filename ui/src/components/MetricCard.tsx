@@ -7,11 +7,20 @@ interface MetricCardProps {
   value: string | number;
   label: string;
   description?: ReactNode;
+  chipLabel?: string;
   to?: string;
   onClick?: () => void;
 }
 
-export function MetricCard({ icon: Icon, value, label, description, to, onClick }: MetricCardProps) {
+export function MetricCard({
+  icon: Icon,
+  value,
+  label,
+  description,
+  chipLabel = "Board signal",
+  to,
+  onClick,
+}: MetricCardProps) {
   const isClickable = !!(to || onClick);
 
   const inner = (
@@ -19,7 +28,7 @@ export function MetricCard({ icon: Icon, value, label, description, to, onClick 
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="brand-chip mb-3 inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
-            Board signal
+            {chipLabel}
           </div>
           <p className="text-3xl sm:text-4xl font-semibold tracking-tight tabular-nums">
             {value}
