@@ -467,6 +467,7 @@ function ConversationPane({
   const [pendingAssistant, setPendingAssistant] = useState(false);
   const [streamMessages, setStreamMessages] = useState<BuilderMessage[]>([]);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   const sessionQueryKey = [...QUERY_KEY, "session", companyId, session.id] as const;
   const proposalsQueryKey = [...QUERY_KEY, "proposals", companyId, session.id] as const;
@@ -505,11 +506,12 @@ function ConversationPane({
     setPendingUserText(null);
     setPendingAssistant(false);
     setStreamMessages([]);
+    shouldAutoScrollRef.current = true;
   }, [session.id]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
-    if (!transcript) return;
+    if (!transcript || !shouldAutoScrollRef.current) return;
     transcript.scrollTo({ top: transcript.scrollHeight, behavior: "auto" });
   }, [displayedMessages, pendingAssistant, pendingUserText, session.id]);
 
@@ -608,7 +610,15 @@ function ConversationPane({
     <div className="flex h-full min-h-0 flex-col">
       <div
         ref={transcriptRef}
+        data-testid="builder-transcript"
         className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-2"
+        onScroll={(event) => {
+          const transcript = event.currentTarget;
+          const threshold = 48;
+          shouldAutoScrollRef.current =
+            transcript.scrollTop + transcript.clientHeight >=
+            transcript.scrollHeight - threshold;
+        }}
       >
         {isArchived ? (
           <div className="rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">

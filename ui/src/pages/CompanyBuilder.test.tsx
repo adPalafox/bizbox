@@ -366,6 +366,75 @@ describe("CompanyBuilder", () => {
     });
   });
 
+  it("does not force-scroll when the operator has scrolled away from the bottom", async () => {
+    sessionDetailState = {
+      ...sessionDetailState,
+      messages: [
+        {
+          id: "msg-1",
+          companyId: "company-1",
+          sessionId: "session-1",
+          sequence: 1,
+          role: "user",
+          content: { text: "Earlier message" },
+          inputTokens: 0,
+          outputTokens: 0,
+          costCents: 0,
+          createdAt,
+        },
+      ],
+    };
+
+    const { root, queryClient } = await renderCompanyBuilder(container);
+    const transcript = container.querySelector('[data-testid="builder-transcript"]');
+    expect(transcript).not.toBeNull();
+
+    Object.defineProperties(transcript as HTMLDivElement, {
+      scrollTop: { configurable: true, value: 0, writable: true },
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+
+    mockScrollTo.mockClear();
+
+    await act(async () => {
+      transcript?.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    sessionDetailState = {
+      ...sessionDetailState,
+      messages: [
+        ...sessionDetailState.messages,
+        {
+          id: "msg-2",
+          companyId: "company-1",
+          sessionId: "session-1",
+          sequence: 2,
+          role: "assistant",
+          content: { text: "New streamed content" },
+          inputTokens: 0,
+          outputTokens: 0,
+          costCents: 0,
+          createdAt,
+        },
+      ],
+    };
+
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["builder", "session", "company-1", "session-1"],
+      });
+    });
+    await flushReact();
+    await flushReact();
+
+    expect(mockScrollTo).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("selects a newly created session immediately", async () => {
     const newSessionCreatedAt = new Date("2026-05-06T10:00:00.000Z");
     const newSession: BuilderSession = {
