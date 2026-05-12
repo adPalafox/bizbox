@@ -304,8 +304,8 @@ function isConfiguredAgentComment(
   user: unknown,
 ): boolean {
   const commentUserId = normalizeCommentUserId(user);
-  if (config.clickupAgentUserId && commentUserId === config.clickupAgentUserId) {
-    return true;
+  if (config.clickupAgentUserId) {
+    return commentUserId === config.clickupAgentUserId;
   }
 
   const authorName = normalizeCommentAuthorName(user);
