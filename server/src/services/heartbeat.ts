@@ -7665,6 +7665,24 @@ export function heartbeatService(db: Db) {
       await releaseIssueExecutionAndPromote(run);
     }
 
+    const [latestSucceededClickupRun] = await db
+      .select({ resultJson: heartbeatRuns.resultJson })
+      .from(heartbeatRuns)
+      .where(
+        and(
+          eq(heartbeatRuns.agentId, agentId),
+          eq(heartbeatRuns.status, "succeeded"),
+          sql`${heartbeatRuns.resultJson} ->> 'clickupBridgeId' is not null`,
+          sql`nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '') is not null`,
+        ),
+      )
+      .orderBy(desc(heartbeatRuns.finishedAt), desc(heartbeatRuns.updatedAt), desc(heartbeatRuns.createdAt))
+      .limit(1);
+
+    if (latestSucceededClickupRun) {
+      await closeClickUpBridgeForRun(latestSucceededClickupRun, reason);
+    }
+
     return runs.length;
   }
 
