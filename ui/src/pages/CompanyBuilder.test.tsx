@@ -213,7 +213,7 @@ async function renderCompanyBuilder(container: HTMLDivElement) {
   await flushReact();
   await flushReact();
 
-  return { root };
+  return { root, queryClient };
 }
 
 function getBuilderComposer(container: HTMLDivElement): HTMLTextAreaElement {
@@ -362,6 +362,40 @@ describe("CompanyBuilder", () => {
 
     expect(mockBuilderApi.createSession).toHaveBeenCalledWith("company-1", {});
     expect(container.textContent).toContain("Fresh plan");
+    expect(mockBuilderApi.getSession).toHaveBeenLastCalledWith("company-1", "session-2");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("falls back to the first session when the active session disappears", async () => {
+    const { root, queryClient } = await renderCompanyBuilder(container);
+
+    expect(mockBuilderApi.getSession).toHaveBeenLastCalledWith("company-1", "session-1");
+
+    const replacementCreatedAt = new Date("2026-05-06T12:00:00.000Z");
+    sessionsState = [
+      {
+        ...sessionsState[0],
+        id: "session-2",
+        title: "Recovered session",
+        createdAt: replacementCreatedAt,
+        updatedAt: replacementCreatedAt,
+      },
+    ];
+    sessionDetailState = {
+      ...sessionsState[0],
+      messages: [],
+    };
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["builder", "sessions", "company-1"] });
+    });
+    await flushReact();
+    await flushReact();
+
+    expect(container.textContent).toContain("Recovered session");
     expect(mockBuilderApi.getSession).toHaveBeenLastCalledWith("company-1", "session-2");
 
     await act(async () => {

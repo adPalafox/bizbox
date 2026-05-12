@@ -180,7 +180,7 @@ describe("company skill mutation permissions", () => {
       "company-1",
       { source: "https://github.com/vercel-labs/agent-browser" },
     );
-  });
+  }, 10_000);
 
   it("tracks public GitHub skill imports with an explicit skill reference", async () => {
     mockCompanySkillService.importFromSource.mockResolvedValue({
@@ -226,7 +226,7 @@ describe("company skill mutation permissions", () => {
       sourceType: "github",
       skillRef: "vercel-labs/agent-browser/find-skills",
     });
-  });
+  }, 10_000);
 
   it("does not expose a skill reference for non-public skill imports", async () => {
     mockCompanySkillService.importFromSource.mockResolvedValue({

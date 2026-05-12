@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Db } from "@paperclipai/db";
 import { agents as agentsTable, clickupBridges, companies, heartbeatRuns, issues as issuesTable } from "@paperclipai/db";
@@ -86,6 +86,7 @@ import {
   resolveDefaultAgentInstructionsBundleRole,
 } from "../services/default-agent-instructions.js";
 import { getTelemetryClient } from "../telemetry.js";
+import { generateEd25519PrivateKeyPem, parseBooleanLike } from "./openclaw-device-auth.js";
 
 const RUN_LOG_DEFAULT_LIMIT_BYTES = 256_000;
 const RUN_LOG_MAX_LIMIT_BYTES = 1024 * 1024;
@@ -700,24 +701,6 @@ export function agentRoutes(db: Db) {
     return merged;
   }
 
-  function parseBooleanLike(value: unknown): boolean | null {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-      return null;
-    }
-    if (typeof value !== "string") return null;
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
-      return true;
-    }
-    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
-      return false;
-    }
-    return null;
-  }
-
   function parseNumberLike(value: unknown): number | null {
     if (typeof value === "number" && Number.isFinite(value)) return value;
     if (typeof value !== "string") return null;
@@ -748,11 +731,6 @@ export function agentRoutes(db: Db) {
 
     normalizedRuntimeConfig.heartbeat = heartbeat;
     return normalizedRuntimeConfig;
-  }
-
-  function generateEd25519PrivateKeyPem(): string {
-    const { privateKey } = generateKeyPairSync("ed25519");
-    return privateKey.export({ type: "pkcs8", format: "pem" }).toString();
   }
 
   function normalizeOpenClawGatewayUrl(value: unknown): string | null {

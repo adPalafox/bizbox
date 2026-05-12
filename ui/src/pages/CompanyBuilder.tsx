@@ -921,7 +921,9 @@ export function CompanyBuilder() {
       setActiveSessionId(sessions[0]?.id ?? null);
       return;
     }
-    if (!sessions.some((session) => session.id === activeSessionId)) return;
+    if (!sessions.some((session) => session.id === activeSessionId)) {
+      setActiveSessionId(sessions[0]?.id ?? null);
+    }
   }, [activeSessionId, sessions]);
 
   const detail = sessionDetailQuery.data?.session ?? null;

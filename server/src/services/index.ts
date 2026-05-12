@@ -60,3 +60,4 @@ export { reconcilePersistedRuntimeServicesOnStartup, restartDesiredRuntimeServic
 export { createStorageServiceFromConfig, getStorageService } from "../storage/index.js";
 export { builderService, registerBuilderTool } from "./builder/index.js";
 export { builderProposalStore } from "./builder/proposal-store.js";
+export { clickupBridgeService } from "./clickup-bridge.js";

@@ -1,6 +1,6 @@
 import { Router, type Request } from "express";
 import type { Db } from "@paperclipai/db";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   applyBuilderProposalSchema,
   createBuilderSessionSchema,
@@ -17,6 +17,7 @@ import { logger } from "../middleware/logger.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import { forbidden, notFound } from "../errors.js";
 import type { BuilderProviderSettings } from "@paperclipai/shared";
+import { generateEd25519PrivateKeyPem, parseBooleanLike } from "./openclaw-device-auth.js";
 
 /**
  * Company AI Builder REST routes.
@@ -89,29 +90,6 @@ function tokenFromAuthorizationHeader(value: string | null) {
   if (!value) return null;
   const match = value.match(/^bearer\s+(.+)$/i);
   return match?.[1]?.trim() || value.trim() || null;
-}
-
-function parseBooleanLike(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-    return null;
-  }
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
-    return true;
-  }
-  if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
-    return false;
-  }
-  return null;
-}
-
-function generateEd25519PrivateKeyPem(): string {
-  const { privateKey } = generateKeyPairSync("ed25519");
-  return privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 }
 
 function ensureGatewayDeviceKey(adapterConfig: Record<string, unknown>): Record<string, unknown> {
