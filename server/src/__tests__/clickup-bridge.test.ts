@@ -1498,7 +1498,7 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(bridge).toEqual(expect.objectContaining({
       clickupTaskId: "task-1",
       clickupTaskUrl: "https://app.clickup.com/t/task-1",
-      status: "pending_clickup_task",
+      status: "waiting_for_agent_reply",
       lastError: "clickup first comment failed: 503",
     }));
     expect(requests.map((request) => request.url)).toEqual([

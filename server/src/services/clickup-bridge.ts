@@ -471,6 +471,8 @@ export function clickupBridgeService(db: Db) {
             await db.update(clickupBridges).set({
               clickupTaskId: taskId,
               clickupTaskUrl: createdTask.taskUrl,
+              status: "waiting_for_agent_reply",
+              nextPollAt: new Date(Date.now() + 2_000),
               lastError: null,
               updatedAt: new Date(),
             }).where(eq(clickupBridges.id, bridge.id));
@@ -478,6 +480,7 @@ export function clickupBridgeService(db: Db) {
               ...bridge,
               clickupTaskId: taskId,
               clickupTaskUrl: createdTask.taskUrl,
+              status: "waiting_for_agent_reply",
             };
 
             const firstComment = await clickupRequest(
