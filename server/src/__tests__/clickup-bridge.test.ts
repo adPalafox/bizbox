@@ -1507,6 +1507,113 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     ]);
   });
 
+  it("skips stale retried create_task comment when newer append_comment exists", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    let failFirstComment = true;
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body && typeof init.body === "string"
+        ? JSON.parse(init.body)
+        : {};
+      requests.push({ url, body });
+      if (url.endsWith("/list/list-1/task")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ id: "task-1", url: "https://app.clickup.com/t/task-1" }),
+        };
+      }
+      if (url.endsWith("/task/task-1/comment")) {
+        if (failFirstComment) {
+          failFirstComment = false;
+          return { ok: false, status: 503, text: async () => "service unavailable" };
+        }
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ id: "comment-1" }),
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const svc = clickupBridgeService(db);
+    await svc.enqueueFromWake({
+      companyId,
+      agentId,
+      context: {
+        paperclipWake: {
+          issue: {
+            id: issueId,
+            identifier: "TES-19",
+            title: "First wake",
+          },
+        },
+      },
+      config: { listId: "list-1", authToken: "token-1", bridgeBotUserId: "bridge-bot-1" },
+    });
+
+    await svc.processOutbound();
+
+    await svc.enqueueFromWake({
+      companyId,
+      agentId,
+      context: {
+        paperclipWake: {
+          issue: {
+            id: issueId,
+            identifier: "TES-19",
+            title: "Second wake",
+          },
+        },
+      },
+      config: { listId: "list-1", authToken: "token-1", bridgeBotUserId: "bridge-bot-1" },
+    });
+
+    await db.update(clickupOutboundEvents).set({ nextAttemptAt: new Date(Date.now() - 1_000) }).where(eq(clickupOutboundEvents.kind, "create_task"));
+
+    await svc.processOutbound(10);
+
+    const commentBodies = requests
+      .filter((request) => request.url.endsWith("/task/task-1/comment"))
+      .map((request) => request.body.comment_text ?? JSON.stringify(request.body));
+    expect(commentBodies).toHaveLength(2);
+    expect(String(commentBodies[1])).toContain("Second wake");
+
+    const events = await db.select().from(clickupOutboundEvents);
+    const createEvent = events.find((event) => event.kind === "create_task");
+    const appendEvent = events.find((event) => event.kind === "append_comment");
+    expect(createEvent).toEqual(expect.objectContaining({ status: "succeeded" }));
+    expect(appendEvent).toEqual(expect.objectContaining({ status: "succeeded" }));
+  });
+
   it("requeues transient outbound failures as pending with a retry timestamp", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new Error("ClickUp unavailable");
@@ -1949,6 +2056,62 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     }));
     expect(requests).toHaveLength(2);
     expect(requests[0]?.body.name).toBe("Recovered task");
+  });
+
+  it("marks non-runnable bridge events terminal on first failure", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Closed ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const [closedBridge] = await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: randomUUID(),
+      taskKey: "issue:closed",
+      clickupListId: "list-1",
+      status: "closed",
+      nextPollAt: null,
+    }).returning();
+
+    await db.insert(clickupOutboundEvents).values({
+      bridgeId: closedBridge!.id,
+      kind: "append_comment",
+      status: "pending",
+      attempts: 0,
+      payload: { body: "stale body", taskName: "Closed task" },
+    });
+
+    await clickupBridgeService(db).processOutbound();
+
+    const event = await db.select().from(clickupOutboundEvents).then((rows) => rows.find((row) => row.bridgeId === closedBridge!.id) ?? null);
+    expect(event).toEqual(expect.objectContaining({
+      status: "failed",
+      attempts: 5,
+      lastError: "clickup bridge not runnable: closed",
+    }));
   });
 
   it("keeps deliberately closed bridges closed when outbound retries exhaust", async () => {

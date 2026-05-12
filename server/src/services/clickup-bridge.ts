@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, lte, or } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
 import { agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
@@ -506,30 +506,52 @@ export function clickupBridgeService(db: Db) {
               updatedAt: new Date(),
             }).where(eq(clickupBridges.id, bridge.id));
           } else {
-            const post = await clickupRequest(
-              `${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}/comment`,
-              { method: "POST", headers, body: JSON.stringify(buildBridgeCommentPayload(body, cfg)) },
-              cfg.timeoutSec,
-            );
-            if (!post.ok) throw new Error(`clickup append comment failed: ${post.status}`);
-            const postedCommentId = extractCommentIdFromCreateResponse(post.text);
-            await db.update(clickupBridges).set({
-              status: "waiting_for_agent_reply",
-              importedCommentIds: postedCommentId ? appendImportedId(bridge.importedCommentIds, postedCommentId) : bridge.importedCommentIds,
-              lastOutboundAt: new Date(),
-              nextPollAt: new Date(Date.now() + 2_000),
-              lastError: null,
-              updatedAt: new Date(),
-            }).where(eq(clickupBridges.id, bridge.id));
-            if (bridge.mode === "automation_trigger" && cfg.statusToTriggerAgent) {
-              try {
-                await clickupRequest(
-                  `${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}`,
-                  { method: "PUT", headers, body: JSON.stringify({ status: cfg.statusToTriggerAgent }) },
-                  cfg.timeoutSec,
-                );
-              } catch {
-                // Best-effort automation trigger. Comment already persisted above.
+            const hasPendingAppendAfterCreate = event.kind === "create_task"
+              ? await db
+                .select({ id: clickupOutboundEvents.id })
+                .from(clickupOutboundEvents)
+                .where(
+                  and(
+                    eq(clickupOutboundEvents.bridgeId, bridge.id),
+                    eq(clickupOutboundEvents.kind, "append_comment"),
+                    or(
+                      eq(clickupOutboundEvents.status, "pending"),
+                      eq(clickupOutboundEvents.status, "processing"),
+                      eq(clickupOutboundEvents.status, "succeeded"),
+                    ),
+                    gt(clickupOutboundEvents.createdAt, event.createdAt),
+                  ),
+                )
+                .limit(1)
+                .then((rows) => rows.length > 0)
+              : false;
+
+            if (!hasPendingAppendAfterCreate) {
+              const post = await clickupRequest(
+                `${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}/comment`,
+                { method: "POST", headers, body: JSON.stringify(buildBridgeCommentPayload(body, cfg)) },
+                cfg.timeoutSec,
+              );
+              if (!post.ok) throw new Error(`clickup append comment failed: ${post.status}`);
+              const postedCommentId = extractCommentIdFromCreateResponse(post.text);
+              await db.update(clickupBridges).set({
+                status: "waiting_for_agent_reply",
+                importedCommentIds: postedCommentId ? appendImportedId(bridge.importedCommentIds, postedCommentId) : bridge.importedCommentIds,
+                lastOutboundAt: new Date(),
+                nextPollAt: new Date(Date.now() + 2_000),
+                lastError: null,
+                updatedAt: new Date(),
+              }).where(eq(clickupBridges.id, bridge.id));
+              if (bridge.mode === "automation_trigger" && cfg.statusToTriggerAgent) {
+                try {
+                  await clickupRequest(
+                    `${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}`,
+                    { method: "PUT", headers, body: JSON.stringify({ status: cfg.statusToTriggerAgent }) },
+                    cfg.timeoutSec,
+                  );
+                } catch {
+                  // Best-effort automation trigger. Comment already persisted above.
+                }
               }
             }
           }
@@ -543,7 +565,8 @@ export function clickupBridgeService(db: Db) {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           const nonRetriableCreateParseFailure = msg.startsWith("clickup create task response parse failed:");
-          const attempts = nonRetriableCreateParseFailure
+          const nonRetriableNotRunnableBridge = msg.startsWith("clickup bridge not runnable:");
+          const attempts = nonRetriableCreateParseFailure || nonRetriableNotRunnableBridge
             ? MAX_OUTBOUND_ATTEMPTS
             : event.attempts + 1;
           const terminal = attempts >= MAX_OUTBOUND_ATTEMPTS;
