@@ -986,6 +986,62 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     }));
   });
 
+  it("only retries failed or closed bridges", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const [activeBridge] = await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: randomUUID(),
+      taskKey: "issue:active",
+      clickupListId: "list-1",
+      status: "pending_clickup_task",
+      nextPollAt: null,
+    }).returning();
+
+    const [failedBridge] = await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: randomUUID(),
+      taskKey: "issue:failed",
+      clickupListId: "list-2",
+      status: "failed",
+      nextPollAt: null,
+    }).returning();
+
+    const activeRetry = await clickupBridgeService(db).retryBridge(activeBridge!.id);
+    expect(activeRetry).toBeNull();
+
+    const failedRetry = await clickupBridgeService(db).retryBridge(failedBridge!.id);
+    expect(failedRetry).toEqual({ id: failedBridge!.id, status: "pending_clickup_task" });
+  });
+
   it("does not enqueue duplicate create_task events while initial task creation is pending", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();

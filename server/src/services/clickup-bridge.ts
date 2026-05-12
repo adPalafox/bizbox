@@ -704,15 +704,27 @@ export function clickupBridgeService(db: Db) {
     async retryBridge(bridgeId: string) {
       const [bridge] = await db.select().from(clickupBridges).where(eq(clickupBridges.id, bridgeId));
       if (!bridge) return null;
+      if (bridge.status !== "failed" && bridge.status !== "closed") return null;
+
       const status = bridge.clickupTaskId ? "waiting_for_agent_reply" : "pending_clickup_task";
-      await db.update(clickupBridges).set({
-        status,
-        lastError: null,
-        consecutivePollFailures: 0,
-        nextPollAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(clickupBridges.id, bridgeId));
-      return { id: bridgeId, status };
+      const [updated] = await db
+        .update(clickupBridges)
+        .set({
+          status,
+          lastError: null,
+          consecutivePollFailures: 0,
+          nextPollAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(clickupBridges.id, bridgeId),
+            or(eq(clickupBridges.status, "failed"), eq(clickupBridges.status, "closed")),
+          ),
+        )
+        .returning({ id: clickupBridges.id, status: clickupBridges.status });
+      if (!updated) return null;
+      return updated;
     },
   };
 }
