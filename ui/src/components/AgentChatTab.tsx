@@ -121,7 +121,7 @@ export const AgentChatTab = memo(function AgentChatTab({
 
       const runCreatedAtMs = Date.parse(run.createdAt);
       const hasAssistantReplySinceRunStarted = (threadResult?.messages ?? []).some((message) => (
-        message.authorAgentId &&
+        message.authorAgentId === run.agentId &&
         Date.parse(String(message.createdAt)) >= runCreatedAtMs
       ));
       return !hasAssistantReplySinceRunStarted;

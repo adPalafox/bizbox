@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Db } from "@paperclipai/db";
 import { agents as agentsTable, clickupBridges, companies, heartbeatRuns, issues as issuesTable } from "@paperclipai/db";
-import { and, desc, eq, inArray, not, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, not, sql } from "drizzle-orm";
 import {
   agentSkillSyncSchema,
   agentMineInboxQuerySchema,
@@ -171,6 +171,12 @@ export function agentRoutes(db: Db) {
         ),
       )
       .innerJoin(agentsTable, eq(clickupBridges.agentId, agentsTable.id))
+      .orderBy(
+        asc(clickupBridges.id),
+        desc(heartbeatRuns.createdAt),
+        desc(clickupBridges.updatedAt),
+        desc(clickupBridges.createdAt),
+      )
       .where(
         and(
           eq(clickupBridges.companyId, input.companyId),
@@ -180,11 +186,6 @@ export function agentRoutes(db: Db) {
             : []),
           ...(input.agentId ? [eq(clickupBridges.agentId, input.agentId)] : []),
         ),
-      )
-      .orderBy(
-        clickupBridges.id,
-        desc(sql`coalesce(${heartbeatRuns.createdAt}, ${clickupBridges.createdAt})`),
-        desc(clickupBridges.updatedAt),
       );
   }
 

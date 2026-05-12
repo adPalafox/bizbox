@@ -349,6 +349,77 @@ describe("AgentChatTab", () => {
     });
   });
 
+  it("keeps synthetic ClickUp live run when reply belongs to a different agent", async () => {
+    mockAgentsApi.threadMessages.mockResolvedValue({
+      thread: {
+        id: "thread-1",
+        companyId: "company-1",
+        agentId: "agent-2",
+        status: "active",
+        archivedAt: null,
+        lastActivityAt: new Date("2026-05-04T09:02:00.000Z"),
+        createdAt: new Date("2026-05-04T09:00:00.000Z"),
+        updatedAt: new Date("2026-05-04T09:02:00.000Z"),
+      },
+      messages: [
+        {
+          id: "message-1",
+          threadId: "thread-1",
+          companyId: "company-1",
+          role: "assistant",
+          authorUserId: null,
+          authorAgentId: "agent-1",
+          producingHeartbeatRunId: null,
+          body: "Imported from ClickUp by another agent",
+          createdAt: new Date("2026-05-04T09:01:00.000Z"),
+          updatedAt: new Date("2026-05-04T09:01:00.000Z"),
+        },
+      ],
+    });
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([
+      {
+        id: "run-clickup-2",
+        status: "running",
+        invocationSource: "assignment",
+        triggerDetail: "clickup_bridge_polling",
+        startedAt: "2026-05-04T09:00:00.000Z",
+        finishedAt: null,
+        createdAt: "2026-05-04T09:00:00.000Z",
+        agentId: "agent-2",
+        agentName: "ClickUp Bridge",
+        adapterType: "clickup_agent_ref",
+        issueId: null,
+        agentThreadId: "thread-1",
+        livenessState: "active",
+        livenessReason: "ClickUp bridge is polling for external replies.",
+        continuationAttempt: 0,
+        lastUsefulActionAt: null,
+        nextAction: "Polling ClickUp for external replies.",
+      },
+    ]);
+
+    cleanup = renderWithQueryClient(
+      <AgentChatTab
+        agentId="agent-2"
+        companyId="company-1"
+        runs={[]}
+      />,
+      container,
+    );
+
+    await waitForAssertion(() => {
+      expect(threadPropsSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          liveRuns: [
+            expect.objectContaining({
+              id: "run-clickup-2",
+            }),
+          ],
+        }),
+      );
+    });
+  });
+
   it("hides synthetic ClickUp live runs after an assistant reply lands in the thread", async () => {
     mockAgentsApi.threadMessages.mockResolvedValue({
       thread: {
