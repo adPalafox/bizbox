@@ -153,7 +153,12 @@ async function persistBuilderSecrets(params: {
 
   if (params.adapterType === "openclaw_gateway") {
     const plainToken = extractOpenClawAuthToken(params.adapterConfig);
-    const sanitized = ensureGatewayDeviceKey(sanitizeOpenClawAdapterConfig(params.adapterConfig));
+    const existingAdapterConfig = asRecord(params.existingSettings?.adapterConfig) ?? {};
+    const existingDevicePrivateKeyPem = asNonEmptyString(existingAdapterConfig.devicePrivateKeyPem);
+    const sanitized = ensureGatewayDeviceKey({
+      ...sanitizeOpenClawAdapterConfig(params.adapterConfig),
+      ...(existingDevicePrivateKeyPem ? { devicePrivateKeyPem: existingDevicePrivateKeyPem } : {}),
+    });
     const existingRef = asRecord(params.existingSettings?.adapterConfig)?.authTokenRef;
     const requestedRef = sanitized.authTokenRef ?? existingRef;
 

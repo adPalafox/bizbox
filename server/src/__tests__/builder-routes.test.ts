@@ -412,6 +412,66 @@ describe("builder routes", () => {
     );
   });
 
+  it("preserves the existing OpenClaw device key on settings updates", async () => {
+    const existingDevicePrivateKeyPem = "-----BEGIN PRIVATE KEY-----\nexisting\n-----END PRIVATE KEY-----";
+    mockBuilderService.getSettings.mockResolvedValue({
+      companyId,
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "wss://gateway.example",
+        disableDeviceAuth: false,
+        devicePrivateKeyPem: existingDevicePrivateKeyPem,
+        authTokenRef: { type: "secret_ref", secretId: "secret-1", version: "latest" },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    mockBuilderService.upsertSettings.mockResolvedValue({
+      companyId,
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "wss://gateway.example",
+        disableDeviceAuth: false,
+        devicePrivateKeyPem: existingDevicePrivateKeyPem,
+        authTokenRef: { type: "secret_ref", secretId: "secret-1", version: "latest" },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+    });
+
+    const res = await request(app)
+      .put(`/api/companies/${companyId}/builder/settings`)
+      .send({
+        adapterType: "openclaw_gateway",
+        adapterConfig: {
+          url: "wss://gateway.example",
+          authToken: "rotated-gateway-token",
+          disableDeviceAuth: false,
+        },
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockBuilderService.upsertSettings).toHaveBeenCalledWith(
+      companyId,
+      expect.objectContaining({
+        adapterType: "openclaw_gateway",
+        adapterConfig: expect.objectContaining({
+          url: "wss://gateway.example",
+          disableDeviceAuth: false,
+          authTokenRef: { type: "secret_ref", secretId: "secret-1", version: "latest" },
+          devicePrivateKeyPem: existingDevicePrivateKeyPem,
+        }),
+      }),
+    );
+  });
+
   it("preserves stored Otto apiKeyRef when the user leaves the field blank", async () => {
     mockBuilderService.getSettings.mockResolvedValue({
       companyId,
