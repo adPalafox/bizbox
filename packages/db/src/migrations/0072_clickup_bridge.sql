@@ -47,3 +47,11 @@ ALTER TABLE "clickup_outbound_events" ADD CONSTRAINT "clickup_outbound_events_br
 CREATE INDEX "clickup_outbound_events_status_idx" ON "clickup_outbound_events" USING btree ("status","next_attempt_at","updated_at");
 --> statement-breakpoint
 CREATE INDEX "clickup_outbound_events_bridge_idx" ON "clickup_outbound_events" USING btree ("bridge_id","created_at");
+--> statement-breakpoint
+CREATE INDEX "heartbeat_runs_clickup_bridge_id_idx"
+  ON "heartbeat_runs" USING btree (("result_json" ->> 'clickupBridgeId'))
+  WHERE ("result_json" ? 'clickupBridgeId');
+--> statement-breakpoint
+CREATE UNIQUE INDEX "clickup_outbound_events_create_task_active_uq"
+  ON "clickup_outbound_events" USING btree ("bridge_id", "kind")
+  WHERE ("kind" = 'create_task' and "status" in ('pending', 'processing'));

@@ -126,19 +126,19 @@ export function agentRoutes(db: Db) {
   }) {
     return db
       .selectDistinctOn([clickupBridges.id], {
-        id: heartbeatRuns.id,
+        id: sql<string>`coalesce(${heartbeatRuns.id}, ${clickupBridges.id})`.as("id"),
         status: sql<string>`'running'`.as("status"),
-        invocationSource: heartbeatRuns.invocationSource,
+        invocationSource: sql<string>`coalesce(${heartbeatRuns.invocationSource}, 'heartbeat')`.as("invocationSource"),
         triggerDetail: sql<string>`'clickup_bridge_polling'`.as("triggerDetail"),
-        startedAt: heartbeatRuns.startedAt,
+        startedAt: sql<Date>`coalesce(${heartbeatRuns.startedAt}, ${clickupBridges.updatedAt})`.as("startedAt"),
         finishedAt: sql<Date | null>`null`.as("finishedAt"),
-        createdAt: heartbeatRuns.createdAt,
-        agentId: heartbeatRuns.agentId,
+        createdAt: sql<Date>`coalesce(${heartbeatRuns.createdAt}, ${clickupBridges.createdAt})`.as("createdAt"),
+        agentId: clickupBridges.agentId,
         agentName: agentsTable.name,
         adapterType: agentsTable.adapterType,
-        livenessState: heartbeatRuns.livenessState,
+        livenessState: sql<string>`coalesce(${heartbeatRuns.livenessState}, 'active')`.as("livenessState"),
         livenessReason: sql<string>`'ClickUp bridge is polling for external replies.'`.as("livenessReason"),
-        continuationAttempt: heartbeatRuns.continuationAttempt,
+        continuationAttempt: sql<number>`coalesce(${heartbeatRuns.continuationAttempt}, 0)`.as("continuationAttempt"),
         lastUsefulActionAt: sql<Date | null>`coalesce(${clickupBridges.lastPolledAt}, ${heartbeatRuns.lastUsefulActionAt})`.as("lastUsefulActionAt"),
         nextAction: sql<string>`
           case
@@ -161,7 +161,7 @@ export function agentRoutes(db: Db) {
         `.as("agentThreadId"),
       })
       .from(clickupBridges)
-      .innerJoin(
+      .leftJoin(
         heartbeatRuns,
         and(
           eq(heartbeatRuns.companyId, clickupBridges.companyId),
@@ -169,11 +169,10 @@ export function agentRoutes(db: Db) {
           sql`${heartbeatRuns.resultJson} ->> 'clickupBridgeId' = ${clickupBridges.id}::text`,
         ),
       )
-      .innerJoin(agentsTable, eq(heartbeatRuns.agentId, agentsTable.id))
+      .innerJoin(agentsTable, eq(clickupBridges.agentId, agentsTable.id))
       .where(
         and(
           eq(clickupBridges.companyId, input.companyId),
-          eq(heartbeatRuns.companyId, input.companyId),
           inArray(clickupBridges.status, [...CLICKUP_ACTIVE_BRIDGE_STATUSES]),
           ...(input.issueId
             ? [eq(clickupBridges.sourceType, "issue"), eq(clickupBridges.sourceId, input.issueId)]
@@ -181,7 +180,11 @@ export function agentRoutes(db: Db) {
           ...(input.agentId ? [eq(clickupBridges.agentId, input.agentId)] : []),
         ),
       )
-      .orderBy(clickupBridges.id, desc(heartbeatRuns.createdAt), desc(clickupBridges.updatedAt));
+      .orderBy(
+        clickupBridges.id,
+        desc(sql`coalesce(${heartbeatRuns.createdAt}, ${clickupBridges.createdAt})`),
+        desc(clickupBridges.updatedAt),
+      );
   }
 
   /** Resolve the adapter config key for the instructions file path. */

@@ -367,7 +367,7 @@ export function clickupBridgeService(db: Db) {
               body,
               taskName,
             },
-          });
+          }).onConflictDoNothing();
         } else {
           await db.update(clickupOutboundEvents).set({
             payload: {

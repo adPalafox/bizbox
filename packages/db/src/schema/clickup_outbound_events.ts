@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, timestamp, integer, jsonb, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { pgTable, uuid, text, timestamp, integer, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { clickupBridges } from "./clickup_bridges.js";
 
 export const clickupOutboundEvents = pgTable(
@@ -18,5 +19,8 @@ export const clickupOutboundEvents = pgTable(
   (table) => ({
     statusIdx: index("clickup_outbound_events_status_idx").on(table.status, table.nextAttemptAt, table.updatedAt),
     bridgeIdx: index("clickup_outbound_events_bridge_idx").on(table.bridgeId, table.createdAt),
+    createTaskPendingUniqueIdx: uniqueIndex("clickup_outbound_events_create_task_active_uq")
+      .on(table.bridgeId, table.kind)
+      .where(sql`${table.kind} = 'create_task' and ${table.status} in ('pending', 'processing')`),
   }),
 );

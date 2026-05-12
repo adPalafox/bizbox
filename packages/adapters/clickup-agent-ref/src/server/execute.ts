@@ -489,7 +489,22 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         };
       }
 
-      const task = parseClickUpTaskResponse(createResult.text);
+      let task: ReturnType<typeof parseClickUpTaskResponse>;
+      try {
+        task = parseClickUpTaskResponse(createResult.text);
+      } catch (parseErr) {
+        const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        const errorMessage = `Task created but response parse failed (task may be orphaned): ${parseMsg}`;
+        await ctx.onLog("stderr", `[clickup-agent-ref] ERROR: ${errorMessage}\n`);
+        return {
+          exitCode: 1,
+          signal: null,
+          timedOut: false,
+          errorMessage,
+          errorCode: "PARSE_ERROR",
+        };
+      }
+
       const taskId = task.taskId;
       const taskUrl = task.taskUrl ?? config.clickupAgentUrl ?? null;
       const summary = taskId
