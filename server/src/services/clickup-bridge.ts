@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, lt, lte, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
 import { agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
@@ -472,20 +472,27 @@ export function clickupBridgeService(db: Db) {
             if (!res.ok) throw new Error(`clickup create task failed: ${res.status}`);
             const createdTask = parseCreatedTaskResponse(res.text);
             const taskId = createdTask.taskId;
-            await db.update(clickupBridges).set({
+            const [updatedBridgeAfterCreate] = await db.update(clickupBridges).set({
               clickupTaskId: taskId,
               clickupTaskUrl: createdTask.taskUrl,
               status: "waiting_for_agent_reply",
               nextPollAt: new Date(Date.now() + 2_000),
               lastError: null,
               updatedAt: new Date(),
-            }).where(eq(clickupBridges.id, bridge.id));
-            bridge = {
-              ...bridge,
-              clickupTaskId: taskId,
-              clickupTaskUrl: createdTask.taskUrl,
-              status: "waiting_for_agent_reply",
-            };
+            }).where(
+              and(
+                eq(clickupBridges.id, bridge.id),
+                inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
+              ),
+            ).returning({ id: clickupBridges.id });
+            if (updatedBridgeAfterCreate) {
+              bridge = {
+                ...bridge,
+                clickupTaskId: taskId,
+                clickupTaskUrl: createdTask.taskUrl,
+                status: "waiting_for_agent_reply",
+              };
+            }
 
             const firstComment = await clickupRequest(
               `${cfg.apiBaseUrl}/task/${taskId}/comment`,
@@ -504,7 +511,12 @@ export function clickupBridgeService(db: Db) {
               nextPollAt: new Date(Date.now() + 2_000),
               lastError: null,
               updatedAt: new Date(),
-            }).where(eq(clickupBridges.id, bridge.id));
+            }).where(
+              and(
+                eq(clickupBridges.id, bridge.id),
+                inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+              ),
+            );
           } else {
             const hasPendingAppendAfterCreate = event.kind === "create_task"
               ? await db
@@ -541,7 +553,12 @@ export function clickupBridgeService(db: Db) {
                 nextPollAt: new Date(Date.now() + 2_000),
                 lastError: null,
                 updatedAt: new Date(),
-              }).where(eq(clickupBridges.id, bridge.id));
+              }).where(
+                and(
+                  eq(clickupBridges.id, bridge.id),
+                  inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+                ),
+              );
               if (bridge.mode === "automation_trigger" && cfg.statusToTriggerAgent) {
                 try {
                   await clickupRequest(
