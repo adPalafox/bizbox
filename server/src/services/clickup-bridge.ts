@@ -354,7 +354,11 @@ export function clickupBridgeService(db: Db) {
             and(
               eq(clickupOutboundEvents.bridgeId, bridge.id),
               eq(clickupOutboundEvents.kind, "create_task"),
-              or(eq(clickupOutboundEvents.status, "pending"), eq(clickupOutboundEvents.status, "processing")),
+              or(
+                eq(clickupOutboundEvents.status, "pending"),
+                eq(clickupOutboundEvents.status, "processing"),
+                eq(clickupOutboundEvents.status, "failed"),
+              ),
             ),
           )
           .limit(1);
