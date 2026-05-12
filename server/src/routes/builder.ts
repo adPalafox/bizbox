@@ -17,6 +17,7 @@ import { logger } from "../middleware/logger.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import { forbidden, notFound } from "../errors.js";
 import type { BuilderProviderSettings } from "@paperclipai/shared";
+import { generateEd25519PrivateKeyPem, parseBooleanLike } from "./openclaw-device-auth.js";
 
 /**
  * Company AI Builder REST routes.
@@ -91,6 +92,16 @@ function tokenFromAuthorizationHeader(value: string | null) {
   return match?.[1]?.trim() || value.trim() || null;
 }
 
+function ensureGatewayDeviceKey(adapterConfig: Record<string, unknown>): Record<string, unknown> {
+  const disableDeviceAuth = parseBooleanLike(adapterConfig.disableDeviceAuth);
+  if (disableDeviceAuth !== false) return adapterConfig;
+  if (asNonEmptyString(adapterConfig.devicePrivateKeyPem)) return adapterConfig;
+  return {
+    ...adapterConfig,
+    devicePrivateKeyPem: generateEd25519PrivateKeyPem(),
+  };
+}
+
 function extractOpenClawAuthToken(adapterConfig: Record<string, unknown>) {
   const explicit = asNonEmptyString(adapterConfig.authToken) ?? asNonEmptyString(adapterConfig.token);
   if (explicit) return explicit;
@@ -142,7 +153,12 @@ async function persistBuilderSecrets(params: {
 
   if (params.adapterType === "openclaw_gateway") {
     const plainToken = extractOpenClawAuthToken(params.adapterConfig);
-    const sanitized = sanitizeOpenClawAdapterConfig(params.adapterConfig);
+    const existingAdapterConfig = asRecord(params.existingSettings?.adapterConfig) ?? {};
+    const existingDevicePrivateKeyPem = asNonEmptyString(existingAdapterConfig.devicePrivateKeyPem);
+    const sanitized = ensureGatewayDeviceKey({
+      ...sanitizeOpenClawAdapterConfig(params.adapterConfig),
+      ...(existingDevicePrivateKeyPem ? { devicePrivateKeyPem: existingDevicePrivateKeyPem } : {}),
+    });
     const existingRef = asRecord(params.existingSettings?.adapterConfig)?.authTokenRef;
     const requestedRef = sanitized.authTokenRef ?? existingRef;
 

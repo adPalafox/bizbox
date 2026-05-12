@@ -1,7 +1,6 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-  BuilderHandoffTarget,
   BuilderMessage,
   BuilderProposal,
   BuilderSession,
@@ -467,6 +466,8 @@ function ConversationPane({
   const [pendingUserText, setPendingUserText] = useState<string | null>(null);
   const [pendingAssistant, setPendingAssistant] = useState(false);
   const [streamMessages, setStreamMessages] = useState<BuilderMessage[]>([]);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
 
   const sessionQueryKey = [...QUERY_KEY, "session", companyId, session.id] as const;
   const proposalsQueryKey = [...QUERY_KEY, "proposals", companyId, session.id] as const;
@@ -505,7 +506,14 @@ function ConversationPane({
     setPendingUserText(null);
     setPendingAssistant(false);
     setStreamMessages([]);
+    shouldAutoScrollRef.current = true;
   }, [session.id]);
+
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript || !shouldAutoScrollRef.current) return;
+    transcript.scrollTo({ top: transcript.scrollHeight, behavior: "auto" });
+  }, [displayedMessages, pendingAssistant, pendingUserText, session.id]);
 
   const submitInput = () => {
     const text = input.trim();
@@ -599,8 +607,19 @@ function ConversationPane({
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-4 overflow-y-auto pr-2">
+    <div className="flex h-full min-h-0 flex-col">
+      <div
+        ref={transcriptRef}
+        data-testid="builder-transcript"
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-2"
+        onScroll={(event) => {
+          const transcript = event.currentTarget;
+          const threshold = 48;
+          shouldAutoScrollRef.current =
+            transcript.scrollTop + transcript.clientHeight >=
+            transcript.scrollHeight - threshold;
+        }}
+      >
         {isArchived ? (
           <div className="rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
             Archived sessions are read-only until restored.
@@ -690,6 +709,7 @@ function ConversationPane({
         <Button
           type="submit"
           disabled={!canSubmit}
+          className="rounded-xl"
         >
           {sendMutation.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -712,85 +732,59 @@ function RuntimeSummaryCard({
   pendingProposals: number;
 }) {
   return (
-    <Card className="border-border/70">
-      <CardHeader className="pb-3">
+    <Card className="rounded-2xl border-border/70">
+      <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Settings2 className="h-4 w-4" />
           Live runtime
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="rounded-xl border border-border/70 bg-muted/20 px-3 py-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            Current adapter
-          </div>
-          <div className="mt-1 font-medium text-foreground">
-            {runtime?.adapterType ?? "Not configured"}
-          </div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            {runtime?.model?.trim() || "No model selected"}
+      <CardContent className="space-y-3 pt-0 text-sm">
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Current adapter
+            </div>
+            <div className="mt-1 font-medium leading-tight text-foreground">
+              {runtime?.adapterType ?? "Not configured"}
+            </div>
+            <div className="mt-0.5 text-sm text-muted-foreground">
+              {runtime?.model?.trim() || "No model selected"}
+            </div>
           </div>
           {runtime?.updatedAt ? (
-            <div className="mt-2 text-xs text-muted-foreground">
-              Updated {formatDateTime(runtime.updatedAt)}
+            <div className="shrink-0 text-right text-xs text-muted-foreground">
+              Updated
+              <div className="mt-0.5">{formatDateTime(runtime.updatedAt)}</div>
             </div>
           ) : null}
         </div>
 
-        <div className="rounded-xl border border-border/70 bg-card px-3 py-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            Session context
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg border border-border/70 px-3 py-2">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Messages
+            </div>
+            <div className="mt-1 text-base font-medium text-foreground">{messageCount}</div>
           </div>
-          <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Transcript messages</span>
-            <span className="font-medium text-foreground">{messageCount}</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Pending proposals</span>
-            <span className="font-medium text-foreground">{pendingProposals}</span>
+          <div className="rounded-lg border border-border/70 px-3 py-2">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Proposals
+            </div>
+            <div className="mt-1 text-base font-medium text-foreground">{pendingProposals}</div>
           </div>
         </div>
 
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-sm text-foreground">
-          Old sessions still run with the current company Builder settings on their next turn.
-        </div>
-
-        <Button asChild variant="outline" className="w-full">
-          <Link to="/company/settings/builder">
-            Open Builder settings
-            <ArrowUpRight className="h-4 w-4" />
+        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span>Old sessions use the latest Builder settings on their next turn.</span>
+          <Link
+            to="/company/settings/builder"
+            className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground hover:text-foreground/80"
+          >
+            Settings
+            <ArrowUpRight className="h-3.5 w-3.5" />
           </Link>
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function WorkflowCard({
-  handoff,
-}: {
-  handoff: BuilderHandoffTarget | null;
-}) {
-  return (
-    <Card className="border-border/70">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm">Workflow</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm text-muted-foreground">
-        <p>
-          Start work here, then continue governed or multi-step actions in the standard surface.
-        </p>
-        <p>
-          Direct actions stay inline only when the change is local and safe.
-        </p>
-        {handoff?.href ? (
-          <Button asChild size="sm" variant="outline" className="w-full">
-            <Link to={handoff.href}>
-              {handoff.label}
-              <ArrowUpRight className="h-4 w-4" />
-            </Link>
-          </Button>
-        ) : null}
+        </div>
       </CardContent>
     </Card>
   );
@@ -865,6 +859,15 @@ export function CompanyBuilder() {
     },
     onSuccess: async (created) => {
       if (!created) return;
+      queryClient.setQueryData<{ sessions: BuilderSession[] } | undefined>(
+        [...QUERY_KEY, "sessions", selectedCompanyId],
+        (current) => ({
+          sessions: [
+            created.session,
+            ...(current?.sessions ?? []).filter((session) => session.id !== created.session.id),
+          ],
+        }),
+      );
       setActiveSessionId(created.session.id);
       await queryClient.invalidateQueries({
         queryKey: [...QUERY_KEY, "sessions", selectedCompanyId],
@@ -885,7 +888,6 @@ export function CompanyBuilder() {
       return builderApi.archiveSession(selectedCompanyId, sessionId);
     },
     onSuccess: async () => {
-      setArchivedSectionOpen(true);
       await queryClient.invalidateQueries({
         queryKey: [...QUERY_KEY, "sessions", selectedCompanyId],
       });
@@ -940,7 +942,11 @@ export function CompanyBuilder() {
       setActiveSessionId(null);
       return;
     }
-    if (!activeSessionId || !sessions.some((session) => session.id === activeSessionId)) {
+    if (!activeSessionId) {
+      setActiveSessionId(sessions[0]?.id ?? null);
+      return;
+    }
+    if (!sessions.some((session) => session.id === activeSessionId)) {
       setActiveSessionId(sessions[0]?.id ?? null);
     }
   }, [activeSessionId, sessions]);
@@ -951,16 +957,6 @@ export function CompanyBuilder() {
   const effectiveRuntimeConfig =
     detail?.effectiveRuntimeConfig ?? activeSession?.effectiveRuntimeConfig ?? null;
 
-  const lastHandoff = useMemo(() => {
-    if (!detail) return null;
-    const messages = [...detail.messages].reverse();
-    for (const message of messages) {
-      const handoff = message.content.toolResult?.handoff;
-      if (handoff?.href) return handoff;
-    }
-    return null;
-  }, [detail]);
-
   if (!selectedCompanyId) {
     return (
       <div className="text-sm text-muted-foreground">
@@ -970,8 +966,8 @@ export function CompanyBuilder() {
   }
 
   return (
-    <div className="grid h-full gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px]">
-      <Card className="overflow-hidden border-border/70">
+    <div className="grid h-full gap-4 lg:grid-cols-[minmax(280px,1fr)_minmax(0,2fr)]">
+      <Card className="overflow-hidden rounded-2xl border-border/70 lg:min-h-0">
         <CardHeader className="border-b border-border/70 pb-3">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-sm">Sessions</CardTitle>
@@ -985,7 +981,7 @@ export function CompanyBuilder() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="p-0 lg:max-h-[calc(100vh-14rem)] lg:overflow-y-auto">
           {sessions.length === 0 ? (
             <div className="p-4 text-sm text-muted-foreground">
               No sessions yet. Start one to plan, draft, or launch company work.
@@ -1073,29 +1069,28 @@ export function CompanyBuilder() {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden border-border/70">
-        <CardHeader className="border-b border-border/70 pb-3">
-          <CardTitle className="text-sm">
-            {activeSession ? getSessionDisplayTitle(activeSession) : "Conversation"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="h-[78vh] p-4">
-          {detail ? (
-            <ConversationPane
-              companyId={selectedCompanyId}
-              session={detail}
-              onBusyChange={setSidebarBusy}
-            />
-          ) : (
-            <EmptyState
-              icon={Sparkles}
-              message="No session selected. Create one to start a Builder conversation."
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="space-y-4">
+      <div className="grid gap-4 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto]">
+        <Card className="overflow-hidden rounded-2xl border-border/70 lg:min-h-0">
+          <CardHeader className="border-b border-border/70 pb-3">
+            <CardTitle className="text-sm">
+              {activeSession ? getSessionDisplayTitle(activeSession) : "Conversation"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-col p-4 lg:h-[calc(100vh-18rem)]">
+            {detail ? (
+              <ConversationPane
+                companyId={selectedCompanyId}
+                session={detail}
+                onBusyChange={setSidebarBusy}
+              />
+            ) : (
+              <EmptyState
+                icon={Sparkles}
+                message="No session selected. Create one to start a Builder conversation."
+              />
+            )}
+          </CardContent>
+        </Card>
         <RuntimeSummaryCard
           runtime={effectiveRuntimeConfig}
           messageCount={detail?.messages.length ?? 0}
@@ -1104,7 +1099,6 @@ export function CompanyBuilder() {
             return status === "pending" || status === "approved";
           }).length ?? 0}
         />
-        <WorkflowCard handoff={lastHandoff} />
       </div>
     </div>
   );

@@ -189,6 +189,8 @@ vi.mock("@/components/ApprovalPayload", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+const mockScrollTo = vi.hoisted(() => vi.fn());
+
 async function flushReact() {
   await act(async () => {
     await Promise.resolve();
@@ -213,7 +215,7 @@ async function renderCompanyBuilder(container: HTMLDivElement) {
   await flushReact();
   await flushReact();
 
-  return { root };
+  return { root, queryClient };
 }
 
 function getBuilderComposer(container: HTMLDivElement): HTMLTextAreaElement {
@@ -255,6 +257,10 @@ describe("CompanyBuilder", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    Object.defineProperty(HTMLDivElement.prototype, "scrollTo", {
+      configurable: true,
+      value: mockScrollTo,
+    });
     sessionsState = [
       {
         id: "session-1",
@@ -312,8 +318,200 @@ describe("CompanyBuilder", () => {
     expect(container.textContent).not.toContain("legacy-model");
     expect(container.textContent).toContain("codex_local");
     expect(container.textContent).toContain("gpt-current");
-    expect(container.textContent).toContain("Open Builder settings");
+    expect(container.textContent).toContain("Settings");
     expect(container.querySelector('[data-testid="agent-config-form"]')).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("anchors the transcript to the latest message by default", async () => {
+    sessionDetailState = {
+      ...sessionDetailState,
+      messages: [
+        {
+          id: "msg-1",
+          companyId: "company-1",
+          sessionId: "session-1",
+          sequence: 1,
+          role: "user",
+          content: { text: "First message" },
+          inputTokens: 0,
+          outputTokens: 0,
+          costCents: 0,
+          createdAt,
+        },
+        {
+          id: "msg-2",
+          companyId: "company-1",
+          sessionId: "session-1",
+          sequence: 2,
+          role: "assistant",
+          content: { text: "Latest message" },
+          inputTokens: 0,
+          outputTokens: 0,
+          costCents: 0,
+          createdAt,
+        },
+      ],
+    };
+
+    const { root } = await renderCompanyBuilder(container);
+
+    expect(mockScrollTo).toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("does not force-scroll when the operator has scrolled away from the bottom", async () => {
+    sessionDetailState = {
+      ...sessionDetailState,
+      messages: [
+        {
+          id: "msg-1",
+          companyId: "company-1",
+          sessionId: "session-1",
+          sequence: 1,
+          role: "user",
+          content: { text: "Earlier message" },
+          inputTokens: 0,
+          outputTokens: 0,
+          costCents: 0,
+          createdAt,
+        },
+      ],
+    };
+
+    const { root, queryClient } = await renderCompanyBuilder(container);
+    const transcript = container.querySelector('[data-testid="builder-transcript"]');
+    expect(transcript).not.toBeNull();
+
+    Object.defineProperties(transcript as HTMLDivElement, {
+      scrollTop: { configurable: true, value: 0, writable: true },
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+
+    mockScrollTo.mockClear();
+
+    await act(async () => {
+      transcript?.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    sessionDetailState = {
+      ...sessionDetailState,
+      messages: [
+        ...sessionDetailState.messages,
+        {
+          id: "msg-2",
+          companyId: "company-1",
+          sessionId: "session-1",
+          sequence: 2,
+          role: "assistant",
+          content: { text: "New streamed content" },
+          inputTokens: 0,
+          outputTokens: 0,
+          costCents: 0,
+          createdAt,
+        },
+      ],
+    };
+
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["builder", "session", "company-1", "session-1"],
+      });
+    });
+    await flushReact();
+    await flushReact();
+
+    expect(mockScrollTo).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("selects a newly created session immediately", async () => {
+    const newSessionCreatedAt = new Date("2026-05-06T10:00:00.000Z");
+    const newSession: BuilderSession = {
+      ...sessionsState[0],
+      id: "session-2",
+      title: "Fresh plan",
+      createdAt: newSessionCreatedAt,
+      updatedAt: newSessionCreatedAt,
+    };
+    const newSessionDetail: BuilderSessionDetail = {
+      ...newSession,
+      messages: [],
+    };
+
+    mockBuilderApi.createSession.mockImplementationOnce(async () => {
+      sessionsState = [newSession, ...sessionsState];
+      return { session: newSession };
+    });
+    mockBuilderApi.getSession.mockImplementation(async (_companyId?: string, sessionId?: string) => ({
+      session: sessionId === newSession.id
+        ? { ...newSessionDetail, messages: [] }
+        : {
+            ...sessionDetailState,
+            messages: [...sessionDetailState.messages],
+          },
+    }));
+
+    const { root } = await renderCompanyBuilder(container);
+    const newButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("New"),
+    );
+    expect(newButton).not.toBeUndefined();
+
+    await act(async () => {
+      newButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
+    await flushReact();
+    await flushReact();
+
+    expect(mockBuilderApi.createSession).toHaveBeenCalledWith("company-1", {});
+    expect(container.textContent).toContain("Fresh plan");
+    expect(mockBuilderApi.getSession).toHaveBeenLastCalledWith("company-1", "session-2");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("falls back to the first session when the active session disappears", async () => {
+    const { root, queryClient } = await renderCompanyBuilder(container);
+
+    expect(mockBuilderApi.getSession).toHaveBeenLastCalledWith("company-1", "session-1");
+
+    const replacementCreatedAt = new Date("2026-05-06T12:00:00.000Z");
+    sessionsState = [
+      {
+        ...sessionsState[0],
+        id: "session-2",
+        title: "Recovered session",
+        createdAt: replacementCreatedAt,
+        updatedAt: replacementCreatedAt,
+      },
+    ];
+    sessionDetailState = {
+      ...sessionsState[0],
+      messages: [],
+    };
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ["builder", "sessions", "company-1"] });
+    });
+    await flushReact();
+    await flushReact();
+
+    expect(container.textContent).toContain("Recovered session");
+    expect(mockBuilderApi.getSession).toHaveBeenLastCalledWith("company-1", "session-2");
 
     await act(async () => {
       root.unmount();
@@ -361,6 +559,7 @@ describe("CompanyBuilder", () => {
       (button) => button.textContent?.includes("Archived"),
     );
     expect(archivedToggle).not.toBeUndefined();
+    expect(container.querySelector('button[aria-label="Restore session"]')).toBeNull();
 
     await act(async () => {
       archivedToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -405,6 +604,16 @@ describe("CompanyBuilder", () => {
 
     expect(mockBuilderApi.archiveSession).toHaveBeenCalledWith("company-1", "session-1");
     expect(container.textContent).toContain("Archived");
+
+    const archivedToggle = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Archived"),
+    );
+    expect(archivedToggle).not.toBeUndefined();
+
+    await act(async () => {
+      archivedToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
 
     const restoreButton = container.querySelector('button[aria-label="Restore session"]');
     expect(restoreButton).not.toBeNull();
