@@ -368,6 +368,14 @@ export function clickupBridgeService(db: Db) {
               taskName,
             },
           });
+        } else {
+          await db.update(clickupOutboundEvents).set({
+            payload: {
+              body,
+              taskName,
+            },
+            updatedAt: now,
+          }).where(eq(clickupOutboundEvents.id, existingCreateEvent[0]!.id));
         }
       } else {
         await db.insert(clickupOutboundEvents).values({
@@ -645,6 +653,12 @@ export function clickupBridgeService(db: Db) {
             }).where(eq(clickupBridges.id, bridge.id));
             if (bridge.sourceType === "issue") {
               const comment = await issuesSvc.addComment(bridge.sourceId, item.text, { agentId: bridge.agentId });
+              imported.add(item.id);
+              await db.update(clickupBridges).set({
+                importedCommentIds: Array.from(imported).slice(-MAX_IMPORTED_IDS),
+                lastImportedCommentId: item.id,
+                updatedAt: new Date(),
+              }).where(eq(clickupBridges.id, bridge.id));
               const issue = await issuesSvc.getById(bridge.sourceId);
               if (issue) {
                 await logActivity(db, {
@@ -673,8 +687,13 @@ export function clickupBridgeService(db: Db) {
                 authorAgentId: bridge.agentId,
                 body: item.text,
               });
+              imported.add(item.id);
+              await db.update(clickupBridges).set({
+                importedCommentIds: Array.from(imported).slice(-MAX_IMPORTED_IDS),
+                lastImportedCommentId: item.id,
+                updatedAt: new Date(),
+              }).where(eq(clickupBridges.id, bridge.id));
             }
-            imported.add(item.id);
           }
 
           await db.update(clickupBridges).set({

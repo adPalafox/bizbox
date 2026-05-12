@@ -1074,13 +1074,19 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     await svc.enqueueFromWake({
       companyId,
       agentId,
-      context: { paperclipWake: { issue: { id: issueId } } },
+      context: {
+        wakeReason: "assignment",
+        paperclipWake: { issue: { id: issueId, identifier: "TES-1", title: "Old title", description: "Old context" } },
+      },
       config: { listId: "list-1", authToken: "token-1", bridgeBotUserId: "bridge-bot-1" },
     });
     await svc.enqueueFromWake({
       companyId,
       agentId,
-      context: { paperclipWake: { issue: { id: issueId } } },
+      context: {
+        wakeReason: "issue_update",
+        paperclipWake: { issue: { id: issueId, identifier: "TES-1", title: "New title", description: "Fresh context" } },
+      },
       config: { listId: "list-1", authToken: "token-1", bridgeBotUserId: "bridge-bot-1" },
     });
 
@@ -1090,6 +1096,10 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
       kind: "create_task",
       status: "pending",
     }));
+    const payload = events[0]?.payload as Record<string, unknown>;
+    expect(String(payload.body ?? "")).toContain("Title: New title");
+    expect(String(payload.body ?? "")).toContain("Issue description:\nFresh context");
+    expect(String(payload.body ?? "")).not.toContain("Title: Old title");
   });
 
   it("refreshes bridge agentId and mode when wake conflicts with existing bridge", async () => {
