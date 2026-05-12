@@ -555,7 +555,7 @@ export function clickupBridgeService(db: Db) {
               updatedAt: new Date(),
             }).where(eq(clickupBridges.id, bridge.id));
             const topRecord = top && typeof top === "object" ? (top as Record<string, unknown>) : null;
-            const topId = asString(topRecord?.id);
+            const topId = asScalarString(topRecord?.id);
             if (!topId) continue;
             const replyRes = await clickupRequest(`${cfg.apiBaseUrl}/comment/${topId}/reply`, { method: "GET", headers }, cfg.timeoutSec);
             if (!replyRes.ok) continue;
