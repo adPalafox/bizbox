@@ -319,7 +319,6 @@ export function clickupBridgeService(db: Db) {
             agentId: input.agentId,
             mode: cfg.mode,
             updatedAt: now,
-            lastError: null,
           },
         })
         // Postgres RETURNING yields post-upsert row, including existing status.
