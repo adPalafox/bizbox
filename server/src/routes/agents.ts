@@ -46,6 +46,7 @@ import {
   companySkillService,
   budgetService,
   heartbeatService,
+  clickupBridgeService,
   ISSUE_LIST_DEFAULT_LIMIT,
   issueApprovalService,
   issueService,
@@ -3004,6 +3005,45 @@ export function agentRoutes(db: Db) {
     }
 
     res.json(liveRuns);
+  });
+
+  router.post("/companies/:companyId/clickup-bridges/:bridgeId/retry", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    const bridgeId = req.params.bridgeId as string;
+    assertCompanyAccess(req, companyId);
+
+    const [bridge] = await db
+      .select({ id: clickupBridges.id })
+      .from(clickupBridges)
+      .where(and(eq(clickupBridges.id, bridgeId), eq(clickupBridges.companyId, companyId)))
+      .limit(1);
+
+    if (!bridge) {
+      res.status(404).json({ error: "ClickUp bridge not found" });
+      return;
+    }
+
+    const retried = await clickupBridgeService(db).retryBridge(bridgeId);
+    if (!retried) {
+      res.status(409).json({ error: "ClickUp bridge is not failed or closed" });
+      return;
+    }
+
+    const actor = getActorInfo(req);
+    await logActivity(db, {
+      companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "clickup_bridge.retried",
+      entityType: "clickup_bridge",
+      entityId: bridgeId,
+      details: { status: retried.status },
+    });
+
+    res.json({ ok: true, bridge: retried });
   });
 
   router.get("/heartbeat-runs/:runId", async (req, res) => {
