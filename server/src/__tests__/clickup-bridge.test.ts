@@ -206,7 +206,7 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
 
     const [bridge] = await db.select().from(clickupBridges);
     expect(bridge).toEqual(expect.objectContaining({
-      status: "waiting_for_agent_reply",
+      status: "agent_replied",
       lastImportedCommentId: "clickup-comment-1",
     }));
     expect(bridge?.nextPollAt).toBeInstanceOf(Date);
@@ -703,7 +703,7 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toBe("Imported from ClickUp");
     expect(bridge).toEqual(expect.objectContaining({
-      status: "waiting_for_agent_reply",
+      status: "agent_replied",
       consecutivePollFailures: 0,
       lastError: null,
     }));
@@ -820,7 +820,7 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
 
     const [bridge] = await db.select().from(clickupBridges);
     expect(bridge).toEqual(expect.objectContaining({
-      status: "waiting_for_agent_reply",
+      status: "agent_replied",
       lastImportedCommentId: "clickup-comment-2",
     }));
     expect(bridge?.nextPollAt).toBeInstanceOf(Date);

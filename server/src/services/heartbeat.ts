@@ -7904,7 +7904,7 @@ export function heartbeatService(db: Db) {
       .where(
         and(
           eq(clickupBridges.id, clickupBridgeId),
-          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
+          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
         ),
       );
   }
@@ -8023,9 +8023,9 @@ export function heartbeatService(db: Db) {
       })
       .where(
         and(
-          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
+          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
           sql`${clickupBridges.id} in (
-            select nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '')
+            select cast(nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '') as uuid)
             from ${heartbeatRuns}
             where ${heartbeatRuns.agentId} = ${agentId}
               and ${heartbeatRuns.status} = 'succeeded'

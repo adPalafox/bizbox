@@ -274,6 +274,7 @@ export function clickupBridgeService(db: Db) {
       const filters = [
         or(
           eq(clickupBridges.status, "waiting_for_agent_reply"),
+          eq(clickupBridges.status, "agent_replied"),
           eq(clickupBridges.status, "pending_clickup_task"),
         ),
         ...(companyId ? [eq(clickupBridges.companyId, companyId)] : []),
@@ -621,7 +622,7 @@ export function clickupBridgeService(db: Db) {
         .from(clickupBridges)
         .where(
           and(
-            eq(clickupBridges.status, "waiting_for_agent_reply"),
+            inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
             or(isNull(clickupBridges.nextPollAt), lte(clickupBridges.nextPollAt, now)),
           ),
         )
@@ -638,7 +639,7 @@ export function clickupBridgeService(db: Db) {
           .where(
             and(
               eq(clickupBridges.id, bridge.id),
-              eq(clickupBridges.status, "waiting_for_agent_reply"),
+              inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
               or(isNull(clickupBridges.nextPollAt), lte(clickupBridges.nextPollAt, now)),
             ),
           )
@@ -762,7 +763,12 @@ export function clickupBridgeService(db: Db) {
             status: candidates.length > 0 ? "agent_replied" : "waiting_for_agent_reply",
             lastError: null,
             updatedAt: new Date(),
-          }).where(and(eq(clickupBridges.id, bridge.id), eq(clickupBridges.status, "waiting_for_agent_reply")));
+          }).where(
+            and(
+              eq(clickupBridges.id, bridge.id),
+              inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
+            ),
+          );
         } catch (err) {
           const failures = (bridge.consecutivePollFailures ?? 0) + 1;
           await db.update(clickupBridges).set({
@@ -772,7 +778,12 @@ export function clickupBridgeService(db: Db) {
             lastPolledAt: new Date(),
             nextPollAt: nextRetryAt(Math.min(failures, 5)),
             updatedAt: new Date(),
-          }).where(and(eq(clickupBridges.id, bridge.id), eq(clickupBridges.status, "waiting_for_agent_reply")));
+          }).where(
+            and(
+              eq(clickupBridges.id, bridge.id),
+              inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
+            ),
+          );
         }
       }
     },
