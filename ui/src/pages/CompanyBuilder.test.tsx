@@ -318,7 +318,7 @@ describe("CompanyBuilder", () => {
     expect(container.textContent).not.toContain("legacy-model");
     expect(container.textContent).toContain("codex_local");
     expect(container.textContent).toContain("gpt-current");
-    expect(container.textContent).toContain("Open Builder settings");
+    expect(container.textContent).toContain("Settings");
     expect(container.querySelector('[data-testid="agent-config-form"]')).toBeNull();
 
     await act(async () => {

@@ -722,54 +722,58 @@ function RuntimeSummaryCard({
 }) {
   return (
     <Card className="border-border/70">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Settings2 className="h-4 w-4" />
           Live runtime
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="rounded-xl border border-border/70 bg-muted/20 px-3 py-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            Current adapter
-          </div>
-          <div className="mt-1 font-medium text-foreground">
-            {runtime?.adapterType ?? "Not configured"}
-          </div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            {runtime?.model?.trim() || "No model selected"}
+      <CardContent className="space-y-3 pt-0 text-sm">
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5">
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Current adapter
+            </div>
+            <div className="mt-1 font-medium leading-tight text-foreground">
+              {runtime?.adapterType ?? "Not configured"}
+            </div>
+            <div className="mt-0.5 text-sm text-muted-foreground">
+              {runtime?.model?.trim() || "No model selected"}
+            </div>
           </div>
           {runtime?.updatedAt ? (
-            <div className="mt-2 text-xs text-muted-foreground">
-              Updated {formatDateTime(runtime.updatedAt)}
+            <div className="shrink-0 text-right text-xs text-muted-foreground">
+              Updated
+              <div className="mt-0.5">{formatDateTime(runtime.updatedAt)}</div>
             </div>
           ) : null}
         </div>
 
-        <div className="rounded-xl border border-border/70 bg-card px-3 py-3">
-          <div className="text-xs uppercase tracking-wide text-muted-foreground">
-            Session context
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg border border-border/70 px-3 py-2">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Messages
+            </div>
+            <div className="mt-1 text-base font-medium text-foreground">{messageCount}</div>
           </div>
-          <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Transcript messages</span>
-            <span className="font-medium text-foreground">{messageCount}</span>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Pending proposals</span>
-            <span className="font-medium text-foreground">{pendingProposals}</span>
+          <div className="rounded-lg border border-border/70 px-3 py-2">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Proposals
+            </div>
+            <div className="mt-1 text-base font-medium text-foreground">{pendingProposals}</div>
           </div>
         </div>
 
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-sm text-foreground">
-          Old sessions still run with the current company Builder settings on their next turn.
-        </div>
-
-        <Button asChild variant="outline" className="w-full">
-          <Link to="/company/settings/builder">
-            Open Builder settings
-            <ArrowUpRight className="h-4 w-4" />
+        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span>Old sessions use the latest Builder settings on their next turn.</span>
+          <Link
+            to="/company/settings/builder"
+            className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground hover:text-foreground/80"
+          >
+            Settings
+            <ArrowUpRight className="h-3.5 w-3.5" />
           </Link>
-        </Button>
+        </div>
       </CardContent>
     </Card>
   );
