@@ -24,6 +24,12 @@ describe("clickup_agent_ref parse", () => {
       comments: [{ id: "c1" }],
     });
   });
+
+  it("normalizes reply collections from reply endpoint", () => {
+    expect(parseClickUpCommentResponse(JSON.stringify({ replies: [{ id: "r1" }] }))).toEqual({
+      comments: [{ id: "r1" }],
+    });
+  });
 });
 
 describe("clickup_agent_ref sessionCodec", () => {

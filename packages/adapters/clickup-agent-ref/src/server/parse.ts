@@ -25,8 +25,13 @@ export function parseClickUpTaskResponse(rawText: string): ParsedClickUpTaskResp
 }
 
 export function parseClickUpCommentResponse(rawText: string): ParsedClickUpCommentResponse {
-  const payload = JSON.parse(rawText) as { comments?: unknown };
+  const payload = JSON.parse(rawText) as { comments?: unknown; replies?: unknown };
+  const collection = Array.isArray(payload.comments)
+    ? payload.comments
+    : Array.isArray(payload.replies)
+      ? payload.replies
+      : [];
   return {
-    comments: Array.isArray(payload.comments) ? payload.comments : [],
+    comments: collection,
   };
 }
