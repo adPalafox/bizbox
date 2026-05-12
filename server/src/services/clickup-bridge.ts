@@ -1,6 +1,6 @@
 import { and, eq, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { buildClickUpContextBody } from "@paperclipai/adapter-clickup-agent-ref/server";
+import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
 import { agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
 import { parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { issueService } from "./issues.js";
@@ -116,6 +116,28 @@ function nextPollAt(now = Date.now(), lastOutboundAt?: Date | null, lastImported
   if (ageMs <= 10 * 60_000) return new Date(now + 5_000);
   if (ageMs <= 60 * 60_000) return new Date(now + 15_000);
   return new Date(now + 60_000);
+}
+
+function buildBridgeCommentPayload(
+  body: string,
+  cfg: ReturnType<typeof resolveConfig>,
+): Record<string, unknown> {
+  const adapterConfig: Parameters<typeof buildCommentPayload>[1] = {
+    apiBaseUrl: cfg.apiBaseUrl,
+    authToken: cfg.authToken,
+    workspaceId: "bridge",
+    listId: cfg.listId,
+    channelId: undefined,
+    clickupAgentName: cfg.clickupAgentName,
+    clickupAgentUserId: cfg.clickupAgentUserId ?? undefined,
+    clickupAgentUrl: cfg.clickupAgentUrl,
+    triggerMode: cfg.mode,
+    automationStatus: cfg.statusToTriggerAgent ?? undefined,
+    automationTags: cfg.automationTags,
+    includeContextJson: cfg.includeContextJson,
+    timeoutSec: cfg.timeoutSec,
+  };
+  return buildCommentPayload(body, adapterConfig);
 }
 
 function appendImportedId(existing: unknown, id: string): string[] {
@@ -421,7 +443,7 @@ export function clickupBridgeService(db: Db) {
 
             const firstComment = await clickupRequest(
               `${cfg.apiBaseUrl}/task/${taskId}/comment`,
-              { method: "POST", headers, body: JSON.stringify({ comment_text: body, notify_all: false }) },
+              { method: "POST", headers, body: JSON.stringify(buildBridgeCommentPayload(body, cfg)) },
               cfg.timeoutSec,
             );
             if (!firstComment.ok) throw new Error(`clickup first comment failed: ${firstComment.status}`);
@@ -440,7 +462,7 @@ export function clickupBridgeService(db: Db) {
           } else {
             const post = await clickupRequest(
               `${cfg.apiBaseUrl}/task/${bridge.clickupTaskId}/comment`,
-              { method: "POST", headers, body: JSON.stringify({ comment_text: body, notify_all: false }) },
+              { method: "POST", headers, body: JSON.stringify(buildBridgeCommentPayload(body, cfg)) },
               cfg.timeoutSec,
             );
             if (!post.ok) throw new Error(`clickup append comment failed: ${post.status}`);

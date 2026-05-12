@@ -132,7 +132,7 @@ function buildBody(ctx: AdapterExecutionContext, config: ClickUpAgentRefConfig):
   });
 }
 
-function buildCommentPayload(body: string, config: ClickUpAgentRefConfig): Record<string, unknown> {
+export function buildCommentPayload(body: string, config: ClickUpAgentRefConfig): Record<string, unknown> {
   if (config.triggerMode === "automation_trigger") {
     return { comment_text: body, notify_all: false };
   }
