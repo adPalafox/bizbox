@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   summarizeHeartbeatRunResultJson,
   buildHeartbeatRunIssueComment,
+  extractHeartbeatRunIssueDocumentPromotions,
   mergeHeartbeatRunResultJson,
 } from "../services/heartbeat-run-summary.js";
 
@@ -55,6 +56,24 @@ describe("buildHeartbeatRunIssueComment", () => {
     expect(comment).not.toContain("Run summary");
   });
 
+  it("strips tagged issue documents from the posted issue comment", () => {
+    const comment = buildHeartbeatRunIssueComment({
+      summary: [
+        "## Summary",
+        "",
+        "Finished both deliverables.",
+        "",
+        "<issue-document key=\"first-doc\" title=\"First Doc\">",
+        "Hidden promoted content",
+        "</issue-document>",
+      ].join("\n"),
+    });
+
+    expect(comment).toBe("## Summary\n\nFinished both deliverables.");
+    expect(comment).not.toContain("<issue-document");
+    expect(comment).not.toContain("Hidden promoted content");
+  });
+
   it("falls back to result or message when summary is missing", () => {
     expect(buildHeartbeatRunIssueComment({ result: "done" })).toBe("done");
     expect(buildHeartbeatRunIssueComment({ message: "completed" })).toBe("completed");
@@ -62,6 +81,73 @@ describe("buildHeartbeatRunIssueComment", () => {
 
   it("returns null when there is no usable final text", () => {
     expect(buildHeartbeatRunIssueComment({ costUsd: 1.2 })).toBeNull();
+  });
+});
+
+describe("extractHeartbeatRunIssueDocumentPromotions", () => {
+  it("extracts tagged issue documents from the final summary", () => {
+    const promotions = extractHeartbeatRunIssueDocumentPromotions({
+      summary: [
+        "## Summary",
+        "",
+        "<issue-document key=\"competitive-landscape\" title=\"Competitive Landscape\">",
+        "# Competitive Landscape",
+        "",
+        "- Acme",
+        "- Umbra",
+        "</issue-document>",
+      ].join("\n"),
+    });
+
+    expect(promotions).toEqual([{
+      key: "competitive-landscape",
+      title: "Competitive Landscape",
+      body: "# Competitive Landscape\n\n- Acme\n- Umbra",
+    }]);
+  });
+
+  it("falls back to a legacy Deliverable section", () => {
+    const promotions = extractHeartbeatRunIssueDocumentPromotions({
+      summary: [
+        "## Summary",
+        "",
+        "- Research complete",
+        "",
+        "## Deliverable: Market Map",
+        "",
+        "# Market Map",
+        "",
+        "- Segment A",
+      ].join("\n"),
+    });
+
+    expect(promotions).toEqual([{
+      key: "market-map",
+      title: "Market Map",
+      body: "# Market Map\n\n- Segment A",
+    }]);
+  });
+
+  it("keeps tagged issue documents when a legacy Deliverable section resolves to the same key", () => {
+    const promotions = extractHeartbeatRunIssueDocumentPromotions({
+      summary: [
+        "## Summary",
+        "",
+        "<issue-document title=\"Deliverable\">",
+        "Tagged body",
+        "</issue-document>",
+        "",
+        "## Deliverable",
+        "",
+        "Legacy body",
+      ].join("\n"),
+    });
+
+    expect(promotions).toEqual([{
+      key: "deliverable",
+      title: "Deliverable",
+      body: "Tagged body",
+    }]);
   });
 });
 
