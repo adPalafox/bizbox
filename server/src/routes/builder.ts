@@ -252,14 +252,24 @@ async function persistBuilderSecrets(params: {
 }
 
 export function builderRoutes(db: Db) {
-  const router = Router();
+  return createBuilderRoutes(db);
+}
+
+export function companyBuilderRoutes(db: Db) {
+  return createBuilderRoutes(db, { scopedToCompany: true });
+}
+
+function createBuilderRoutes(db: Db, options?: { scopedToCompany?: boolean }) {
+  const router = Router(options?.scopedToCompany ? { mergeParams: true } : undefined);
   const svc = builderService(db);
+  const route = (path: string) =>
+    options?.scopedToCompany ? path : `/companies/:companyId/builder${path}`;
 
   // ------------------------------------------------------------------------
   // Provider settings
   // ------------------------------------------------------------------------
 
-  router.get("/companies/:companyId/builder/settings", async (req, res) => {
+  router.get(route("/settings"), async (req, res) => {
     await assertBuilderEnabled(db);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -269,7 +279,7 @@ export function builderRoutes(db: Db) {
   });
 
   router.put(
-    "/companies/:companyId/builder/settings",
+    route("/settings"),
     validate(updateBuilderProviderSettingsSchema),
     async (req, res) => {
       await assertBuilderEnabled(db);
@@ -315,7 +325,7 @@ export function builderRoutes(db: Db) {
   // Tool catalog
   // ------------------------------------------------------------------------
 
-  router.get("/companies/:companyId/builder/tools", async (req, res) => {
+  router.get(route("/tools"), async (req, res) => {
     await assertBuilderEnabled(db);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -327,7 +337,7 @@ export function builderRoutes(db: Db) {
   // Sessions
   // ------------------------------------------------------------------------
 
-  router.get("/companies/:companyId/builder/sessions", async (req, res) => {
+  router.get(route("/sessions"), async (req, res) => {
     await assertBuilderEnabled(db);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -338,7 +348,7 @@ export function builderRoutes(db: Db) {
   });
 
   router.post(
-    "/companies/:companyId/builder/sessions",
+    route("/sessions"),
     validate(createBuilderSessionSchema),
     async (req, res) => {
       await assertBuilderEnabled(db);
@@ -370,7 +380,7 @@ export function builderRoutes(db: Db) {
     },
   );
 
-  router.get("/companies/:companyId/builder/sessions/:sessionId", async (req, res) => {
+  router.get(route("/sessions/:sessionId"), async (req, res) => {
     await assertBuilderEnabled(db);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -381,7 +391,7 @@ export function builderRoutes(db: Db) {
   });
 
   router.post(
-    "/companies/:companyId/builder/sessions/:sessionId/messages",
+    route("/sessions/:sessionId/messages"),
     validate(sendBuilderMessageSchema),
     async (req, res) => {
       await assertBuilderEnabled(db);
@@ -427,7 +437,7 @@ export function builderRoutes(db: Db) {
   );
 
   router.post(
-    "/companies/:companyId/builder/sessions/:sessionId/abort",
+    route("/sessions/:sessionId/abort"),
     async (req, res) => {
       await assertBuilderEnabled(db);
       const companyId = req.params.companyId as string;
@@ -456,7 +466,7 @@ export function builderRoutes(db: Db) {
   );
 
   router.post(
-    "/companies/:companyId/builder/sessions/:sessionId/archive",
+    route("/sessions/:sessionId/archive"),
     async (req, res) => {
       await assertBuilderEnabled(db);
       const companyId = req.params.companyId as string;
@@ -484,7 +494,7 @@ export function builderRoutes(db: Db) {
   );
 
   router.post(
-    "/companies/:companyId/builder/sessions/:sessionId/restore",
+    route("/sessions/:sessionId/restore"),
     async (req, res) => {
       await assertBuilderEnabled(db);
       const companyId = req.params.companyId as string;
@@ -520,7 +530,7 @@ export function builderRoutes(db: Db) {
   // start using the API now and gain incremental updates later transparently.
 
   router.post(
-    "/companies/:companyId/builder/sessions/:sessionId/messages/stream",
+    route("/sessions/:sessionId/messages/stream"),
     validate(sendBuilderMessageSchema),
     async (req, res) => {
       await assertBuilderEnabled(db);
@@ -603,7 +613,7 @@ export function builderRoutes(db: Db) {
   // Proposals (Phases 1 + 2)
   // ------------------------------------------------------------------------
 
-  router.get("/companies/:companyId/builder/proposals", async (req, res) => {
+  router.get(route("/proposals"), async (req, res) => {
     await assertBuilderEnabled(db);
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -624,7 +634,7 @@ export function builderRoutes(db: Db) {
   });
 
   router.get(
-    "/companies/:companyId/builder/proposals/:proposalId",
+    route("/proposals/:proposalId"),
     async (req, res) => {
       await assertBuilderEnabled(db);
       const companyId = req.params.companyId as string;
@@ -638,7 +648,7 @@ export function builderRoutes(db: Db) {
   );
 
   router.post(
-    "/companies/:companyId/builder/proposals/:proposalId/apply",
+    route("/proposals/:proposalId/apply"),
     validate(applyBuilderProposalSchema),
     async (req, res) => {
       await assertBuilderEnabled(db);
@@ -653,7 +663,7 @@ export function builderRoutes(db: Db) {
   );
 
   router.post(
-    "/companies/:companyId/builder/proposals/:proposalId/reject",
+    route("/proposals/:proposalId/reject"),
     validate(rejectBuilderProposalSchema),
     async (req, res) => {
       await assertBuilderEnabled(db);
