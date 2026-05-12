@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Db } from "@paperclipai/db";
 import { agents as agentsTable, companies, heartbeatRuns, issues as issuesTable } from "@paperclipai/db";
@@ -85,6 +85,7 @@ import {
   resolveDefaultAgentInstructionsBundleRole,
 } from "../services/default-agent-instructions.js";
 import { getTelemetryClient } from "../telemetry.js";
+import { generateEd25519PrivateKeyPem, parseBooleanLike } from "./openclaw-device-auth.js";
 
 const RUN_LOG_DEFAULT_LIMIT_BYTES = 256_000;
 const RUN_LOG_MAX_LIMIT_BYTES = 1024 * 1024;
@@ -633,24 +634,6 @@ export function agentRoutes(db: Db) {
     return merged;
   }
 
-  function parseBooleanLike(value: unknown): boolean | null {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-      return null;
-    }
-    if (typeof value !== "string") return null;
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") {
-      return true;
-    }
-    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") {
-      return false;
-    }
-    return null;
-  }
-
   function parseNumberLike(value: unknown): number | null {
     if (typeof value === "number" && Number.isFinite(value)) return value;
     if (typeof value !== "string") return null;
@@ -683,19 +666,43 @@ export function agentRoutes(db: Db) {
     return normalizedRuntimeConfig;
   }
 
-  function generateEd25519PrivateKeyPem(): string {
-    const { privateKey } = generateKeyPairSync("ed25519");
-    return privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  function normalizeOpenClawGatewayUrl(value: unknown): string | null {
+    const raw = asNonEmptyString(value);
+    if (!raw) return null;
+    try {
+      const parsed = new URL(raw);
+      parsed.hash = "";
+      parsed.search = "";
+      parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+      return parsed.toString();
+    } catch {
+      return raw.trim();
+    }
   }
 
-  function ensureGatewayDeviceKey(
+  async function ensureGatewayDeviceKey(
+    companyId: string,
     adapterType: string | null | undefined,
     adapterConfig: Record<string, unknown>,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     if (adapterType !== "openclaw_gateway") return adapterConfig;
     const disableDeviceAuth = parseBooleanLike(adapterConfig.disableDeviceAuth);
     if (disableDeviceAuth !== false) return adapterConfig;
     if (asNonEmptyString(adapterConfig.devicePrivateKeyPem)) return adapterConfig;
+
+    const targetUrl = normalizeOpenClawGatewayUrl(adapterConfig.url);
+    if (targetUrl) {
+      const existingAgents = await svc.list(companyId);
+      for (const existingAgent of existingAgents) {
+        if (existingAgent.adapterType !== "openclaw_gateway") continue;
+        const existingConfig = asRecord(existingAgent.adapterConfig) ?? {};
+        if (normalizeOpenClawGatewayUrl(existingConfig.url) !== targetUrl) continue;
+        const sharedDeviceKey = asNonEmptyString(existingConfig.devicePrivateKeyPem);
+        if (!sharedDeviceKey) continue;
+        return { ...adapterConfig, devicePrivateKeyPem: sharedDeviceKey };
+      }
+    }
+
     return { ...adapterConfig, devicePrivateKeyPem: generateEd25519PrivateKeyPem() };
   }
 
@@ -714,17 +721,17 @@ export function agentRoutes(db: Db) {
       if (!hasBypassFlag) {
         next.dangerouslyBypassApprovalsAndSandbox = DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX;
       }
-      return ensureGatewayDeviceKey(adapterType, next);
+      return next;
     }
     if (adapterType === "gemini_local" && !asNonEmptyString(next.model)) {
       next.model = DEFAULT_GEMINI_LOCAL_MODEL;
-      return ensureGatewayDeviceKey(adapterType, next);
+      return next;
     }
     // OpenCode requires explicit model selection — no default
     if (adapterType === "cursor" && !asNonEmptyString(next.model)) {
       next.model = DEFAULT_CURSOR_LOCAL_MODEL;
     }
-    return ensureGatewayDeviceKey(adapterType, next);
+    return next;
   }
 
   async function assertAdapterConfigConstraints(
@@ -1654,9 +1661,13 @@ export function agentRoutes(db: Db) {
       req,
       (hireInput.adapterConfig ?? {}) as Record<string, unknown>,
     );
-    const requestedAdapterConfig = applyCreateDefaultsByAdapterType(
+    const requestedAdapterConfig = await ensureGatewayDeviceKey(
+      companyId,
       hireInput.adapterType,
-      ((hireInput.adapterConfig ?? {}) as Record<string, unknown>),
+      applyCreateDefaultsByAdapterType(
+        hireInput.adapterType,
+        ((hireInput.adapterConfig ?? {}) as Record<string, unknown>),
+      ),
     );
     const persistedRequestedAdapterConfig =
       hireInput.adapterType === "openclaw_gateway"
@@ -1852,9 +1863,13 @@ export function agentRoutes(db: Db) {
       req,
       (createInput.adapterConfig ?? {}) as Record<string, unknown>,
     );
-    const requestedAdapterConfig = applyCreateDefaultsByAdapterType(
+    const requestedAdapterConfig = await ensureGatewayDeviceKey(
+      companyId,
       createInput.adapterType,
-      ((createInput.adapterConfig ?? {}) as Record<string, unknown>),
+      applyCreateDefaultsByAdapterType(
+        createInput.adapterType,
+        ((createInput.adapterConfig ?? {}) as Record<string, unknown>),
+      ),
     );
     const persistedRequestedAdapterConfig =
       createInput.adapterType === "openclaw_gateway"
