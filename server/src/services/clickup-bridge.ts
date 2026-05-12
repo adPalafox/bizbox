@@ -652,7 +652,13 @@ export function clickupBridgeService(db: Db) {
             }).where(eq(clickupBridges.id, bridge.id));
             const topRecord = top && typeof top === "object" ? (top as Record<string, unknown>) : null;
             const topId = asScalarString(topRecord?.id);
-            if (!topId) continue;
+            const replyCount =
+              typeof topRecord?.reply_count === "number" && Number.isFinite(topRecord.reply_count)
+                ? topRecord.reply_count
+                : typeof topRecord?.reply_count === "string" && topRecord.reply_count.trim().length > 0
+                  ? Number.parseInt(topRecord.reply_count.trim(), 10)
+                  : 0;
+            if (!topId || !replyCount || replyCount < 1) continue;
             const replyRes = await clickupRequest(`${cfg.apiBaseUrl}/comment/${topId}/reply`, { method: "GET", headers }, cfg.timeoutSec);
             if (!replyRes.ok) continue;
             try {

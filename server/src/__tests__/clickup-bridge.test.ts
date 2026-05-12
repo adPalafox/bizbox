@@ -232,6 +232,103 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     }));
   });
 
+  it("skips reply fetch for top-level comments with no replies", async () => {
+    const requestUrls: string[] = [];
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requestUrls.push(url);
+      if (url.endsWith("/task/task-1/comment")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            comments: [
+              {
+                id: "clickup-comment-1",
+                comment_text: "Top level no replies",
+                user: { id: 101 },
+                date: 1710000000000,
+                reply_count: 0,
+              },
+              {
+                id: "clickup-comment-2",
+                comment_text: "Top level with replies",
+                user: { id: 101 },
+                date: 1710000001000,
+                reply_count: 2,
+              },
+            ],
+          }),
+        };
+      }
+      if (url.endsWith("/comment/clickup-comment-2/reply")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ comments: [] }),
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      issueNumber: 99,
+      identifier: "TES-99",
+      title: "Reply fetch gating",
+      status: "todo",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: issueId,
+      taskKey: "issue:TES-99",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date(Date.now() - 60_000),
+    });
+
+    await clickupBridgeService(db).pollInbound();
+
+    expect(requestUrls.filter((url) => url.includes("/comment/") && url.endsWith("/reply"))).toEqual([
+      "https://api.clickup.com/api/v2/comment/clickup-comment-2/reply",
+    ]);
+  });
+
   it("imports agent replies when only clickupAgentUserId is configured", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
