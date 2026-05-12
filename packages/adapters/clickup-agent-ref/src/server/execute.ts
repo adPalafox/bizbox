@@ -253,6 +253,24 @@ function normalizeCommentText(raw: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function renderCommentRichText(raw: unknown): string | null {
+  if (!Array.isArray(raw)) return null;
+  const text = raw
+    .map((part) => {
+      if (!part || typeof part !== "object") return "";
+      const row = part as Record<string, unknown>;
+      if (typeof row.text === "string" && row.text.length > 0) return row.text;
+      const user = row.user && typeof row.user === "object" ? (row.user as Record<string, unknown>) : null;
+      const username = typeof user?.username === "string" ? user.username.trim() : "";
+      if (row.type === "tag") return username ? `@${username}` : "@user";
+      return "";
+    })
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > 0 ? text : null;
+}
+
 function normalizeCommentAuthorName(raw: unknown): string | null {
   const user = raw && typeof raw === "object" ? (raw as ClickUpCommentUser) : null;
   const username = typeof user?.username === "string" ? user.username.trim() : "";
@@ -306,7 +324,7 @@ function toImportedComment(
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
   const id = typeof record.id === "string" ? record.id.trim() : "";
-  const body = normalizeCommentText(record.comment_text);
+  const body = normalizeCommentText(record.comment_text) ?? renderCommentRichText(record.comment);
   const createdAt = normalizeCommentDate(record.date);
   if (!id || !body || createdAt == null) return null;
   if (!isConfiguredAgentComment(config, record.user)) return null;

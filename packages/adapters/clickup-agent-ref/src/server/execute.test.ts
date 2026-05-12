@@ -456,4 +456,81 @@ describe("clickup_agent_ref execute", () => {
       syncedClickupCommentIds: expect.arrayContaining(["already_seen", "reply_1"]),
     });
   });
+
+  it("imports rich-text ClickUp agent replies when comment_text is absent", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          comments: [
+            {
+              id: "comment_parent",
+              comment_text: "@Risk Witherspoon",
+              user: { id: 300858277, username: "Dennis Leon" },
+              date: "1777872282123",
+              reply_count: 1,
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          comments: [
+            {
+              id: "reply_rich_1",
+              comment: [
+                { text: "Please review " },
+                { type: "tag", user: { id: -16805283, username: "Risk Witherspoon" } },
+                { text: " before merge" },
+              ],
+              user: { id: -16805283, username: "Risk Witherspoon" },
+              date: "1777872301111",
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "comment_123" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "task_123" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
+    const result = await execute(
+      makeContext(
+        {
+          authToken: "token",
+          workspaceId: "team_1",
+          listId: "list_1",
+          clickupAgentName: "Risk Witherspoon",
+          clickupAgentUserId: -16805283,
+        },
+        { clickupTaskId: "task_123", syncedClickupCommentIds: [] },
+      ),
+    );
+
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.clickup.com/api/v2/comment/comment_parent/reply");
+    expect(result.resultJson).toMatchObject({
+      importedIssueComments: [
+        {
+          externalId: "reply_rich_1",
+          body: expect.stringContaining("Please review @Risk Witherspoon before merge"),
+        },
+      ],
+    });
+    expect(result.sessionParams).toMatchObject({
+      syncedClickupCommentIds: expect.arrayContaining(["reply_rich_1"]),
+    });
+  });
 });
