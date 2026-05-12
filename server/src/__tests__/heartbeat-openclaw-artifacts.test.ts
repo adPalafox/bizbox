@@ -124,16 +124,7 @@ describeEmbeddedPostgres("heartbeat issue-backed artifact persistence", () => {
     await db.delete(issueWorkProducts);
     await db.delete(issues);
     await db.delete(heartbeatRunEvents);
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await db.delete(activityLog);
-      try {
-        await db.delete(heartbeatRuns);
-        break;
-      } catch (error) {
-        if (attempt === 4) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    }
+    await db.delete(heartbeatRuns);
     await db.delete(agentWakeupRequests);
     await db.delete(agentRuntimeState);
     await db.delete(agents);

@@ -2,11 +2,7 @@
 import fs from "node:fs/promises";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { repoRoot } from "./dev-service-profile.ts";
-
-const execFileAsync = promisify(execFile);
 
 type WorkspaceLinkMismatch = {
   workspaceDir: string;
@@ -118,12 +114,4 @@ async function ensureWorkspaceLinksCurrent(workspaceDir: string) {
 
 for (const workspaceDir of workspaceDirs) {
   await ensureWorkspaceLinksCurrent(workspaceDir);
-}
-
-const pluginSdkDistEntry = path.join(repoRoot, "packages/plugins/sdk/dist/index.js");
-if (!existsSync(pluginSdkDistEntry)) {
-  console.log("[paperclip] plugin sdk dist output missing; building @paperclipai/plugin-sdk...");
-  await execFileAsync("pnpm", ["--filter", "@paperclipai/plugin-sdk", "build"], {
-    cwd: repoRoot,
-  });
 }

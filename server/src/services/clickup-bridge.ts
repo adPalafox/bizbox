@@ -1,33 +1,14 @@
 import { and, eq, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
+import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
 import { agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
-import { asString as readString, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import { parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { issueService } from "./issues.js";
 import { agentThreadService } from "./agent-threads.js";
 import { logActivity } from "./activity-log.js";
 
 type BridgeSource = { sourceType: "issue" | "agent_thread"; sourceId: string; taskKey: string };
 type TriggerMode = "api_comment_only" | "automation_trigger";
-type ClickUpCommentPayloadConfig = {
-  apiBaseUrl: string;
-  authToken: string;
-  workspaceId: string;
-  listId: string;
-  channelId?: string;
-  clickupAgentName?: string;
-  clickupAgentUserId?: number;
-  clickupAgentUrl?: string;
-  triggerMode: TriggerMode;
-  automationStatus?: string;
-  automationTags: string[];
-  includeContextJson: boolean;
-  timeoutSec: number;
-};
-type ClickUpContextBodyConfig = {
-  clickupAgentName?: string;
-  clickupAgentUrl?: string;
-  includeContextJson: boolean;
-};
 
 const MAX_OUTBOUND_ATTEMPTS = 5;
 const MAX_POLL_FAILURES = 10;
@@ -48,125 +29,6 @@ function asScalarString(v: unknown): string {
 function asNumber(v: unknown, fallback: number): number {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   return Number.isFinite(n) ? Number(n) : fallback;
-}
-
-function buildClickUpContextBody(
-  rawContext: Record<string, unknown>,
-  config: ClickUpContextBodyConfig,
-): string {
-  const context = parseObject(rawContext);
-  const issue = parseObject(context.issue);
-  const wake = parseObject(context.paperclipWake);
-  const wakeIssue = parseObject(wake.issue);
-  const continuationSummary = parseObject(context.paperclipContinuationSummary);
-  const comments = Array.isArray(wake.comments) ? wake.comments : [];
-  const segments: string[] = [];
-
-  const identifier = readString(issue.identifier, "").trim() || readString(wakeIssue.identifier, "").trim();
-  const title =
-    readString(issue.title, "").trim()
-    || readString(wakeIssue.title, "").trim()
-    || readString(context.issueTitle, "").trim();
-  const status = readString(issue.status, "").trim() || readString(wakeIssue.status, "").trim();
-  const priority = readString(issue.priority, "").trim() || readString(wakeIssue.priority, "").trim();
-  const description =
-    readString(issue.description, "").trim()
-    || readString(wakeIssue.description, "").trim();
-
-  if (config.clickupAgentName) {
-    segments.push(`Target ClickUp agent: ${config.clickupAgentName}`);
-  }
-  if (config.clickupAgentUrl) {
-    segments.push(`ClickUp agent URL: ${config.clickupAgentUrl}`);
-  }
-
-  const issueLines = [
-    identifier ? `Issue: ${identifier}` : null,
-    title ? `Title: ${title}` : null,
-    status ? `Status: ${status}` : null,
-    priority ? `Priority: ${priority}` : null,
-  ].filter((line): line is string => Boolean(line));
-  if (issueLines.length > 0) {
-    segments.push(issueLines.join("\n"));
-  }
-  if (description) {
-    segments.push(`Issue description:\n${description}`);
-  }
-
-  const promptFields = [context.prompt, context.instructions, context.wakeText].filter(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
-  );
-  if (promptFields.length > 0) {
-    segments.push(promptFields.join("\n\n"));
-  }
-
-  const effectiveWakeReason =
-    readString(context.wakeReason, "").trim() || readString(wake.reason, "").trim();
-  if (effectiveWakeReason) {
-    segments.push(`Wake reason: ${effectiveWakeReason}`);
-  }
-
-  if (comments.length > 0) {
-    const commentLines = comments
-      .map((entry) => {
-        const record = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
-        const body = typeof record?.body === "string" ? record.body.trim() : "";
-        if (!body) return null;
-        return `- ${body}`;
-      })
-      .filter((line): line is string => Boolean(line));
-    if (commentLines.length > 0) {
-      segments.push(`Recent Bizbox comments:\n${commentLines.join("\n")}`);
-    }
-  }
-
-  const continuationBody = readString(continuationSummary.body, "").trim();
-  if (continuationBody) {
-    segments.push(`Continuation summary:\n${continuationBody}`);
-  }
-
-  if (config.includeContextJson) {
-    segments.push(`Bizbox context JSON:\n${JSON.stringify(context, null, 2)}`);
-  }
-
-  return segments.join("\n\n").trim() || "Work synchronized from Bizbox.";
-}
-
-function buildCommentPayload(
-  body: string,
-  config: ClickUpCommentPayloadConfig,
-): Record<string, unknown> {
-  if (config.triggerMode === "automation_trigger") {
-    return { comment_text: body, notify_all: false };
-  }
-  if (!config.clickupAgentUserId) {
-    if (config.clickupAgentName) {
-      return {
-        comment_text: `@${config.clickupAgentName}\n\n${body}`,
-        notify_all: false,
-      };
-    }
-    return { comment_text: body, notify_all: false };
-  }
-
-  const prefix = config.clickupAgentName
-    ? `Requesting review from ${config.clickupAgentName}: `
-    : "Requesting review: ";
-
-  return {
-    comment: [
-      { text: prefix },
-      {
-        type: "tag",
-        user: {
-          id: config.clickupAgentUserId,
-        },
-      },
-      { text: `\n\n${body}` },
-    ],
-    notify_all: false,
-    assignee: config.clickupAgentUserId,
-  };
 }
 
 export function resolveBridgeSource(context: Record<string, unknown>): BridgeSource {
@@ -260,7 +122,7 @@ function buildBridgeCommentPayload(
   body: string,
   cfg: ReturnType<typeof resolveConfig>,
 ): Record<string, unknown> {
-  const adapterConfig: ClickUpCommentPayloadConfig = {
+  const adapterConfig: Parameters<typeof buildCommentPayload>[1] = {
     apiBaseUrl: cfg.apiBaseUrl,
     authToken: cfg.authToken,
     workspaceId: "bridge",
@@ -842,7 +704,6 @@ export function clickupBridgeService(db: Db) {
     async retryBridge(bridgeId: string) {
       const [bridge] = await db.select().from(clickupBridges).where(eq(clickupBridges.id, bridgeId));
       if (!bridge) return null;
-      if (bridge.status !== "failed" && bridge.status !== "closed") return null;
       const status = bridge.clickupTaskId ? "waiting_for_agent_reply" : "pending_clickup_task";
       await db.update(clickupBridges).set({
         status,
