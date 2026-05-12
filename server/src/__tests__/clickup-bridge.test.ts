@@ -1604,6 +1604,87 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     ]);
   });
 
+  it("does not reopen a bridge closed during in-flight outbound failure", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    const svc = clickupBridgeService(db);
+    const enqueued = await svc.enqueueFromWake({
+      companyId,
+      agentId,
+      context: {
+        paperclipWake: {
+          issue: {
+            id: issueId,
+            identifier: "TES-20",
+            title: "Close while outbound in-flight",
+          },
+        },
+      },
+      config: { listId: "list-1", authToken: "token-1", bridgeBotUserId: "bridge-bot-1" },
+    });
+
+    let closedBridgeDuringFailure = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/list/list-1/task")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ id: "task-1", url: "https://app.clickup.com/t/task-1" }),
+        };
+      }
+      if (url.endsWith("/task/task-1/comment")) {
+        if (!closedBridgeDuringFailure) {
+          closedBridgeDuringFailure = true;
+          await db.update(clickupBridges).set({
+            status: "closed",
+            nextPollAt: null,
+            updatedAt: new Date(),
+          }).where(eq(clickupBridges.id, enqueued.bridgeId));
+        }
+        return {
+          ok: false,
+          status: 503,
+          text: async () => "temporary failure",
+        };
+      }
+      throw new Error(`Unexpected fetch call: ${url}`);
+    }));
+
+    await svc.processOutbound();
+
+    const [bridge] = await db.select().from(clickupBridges).where(eq(clickupBridges.id, enqueued.bridgeId));
+    expect(bridge).toEqual(expect.objectContaining({
+      status: "closed",
+      nextPollAt: null,
+    }));
+  });
+
   it("skips stale retried create_task comment when newer append_comment exists", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();
@@ -2263,7 +2344,6 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     const event = await db.select().from(clickupOutboundEvents).then((rows) => rows.find((row) => row.bridgeId === closedBridge!.id) ?? null);
     expect(bridge).toEqual(expect.objectContaining({
       status: "closed",
-      lastError: "clickup bridge not runnable: closed",
     }));
     expect(event).toEqual(expect.objectContaining({
       status: "failed",

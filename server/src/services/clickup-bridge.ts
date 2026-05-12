@@ -604,7 +604,12 @@ export function clickupBridgeService(db: Db) {
               status: nextBridgeStatus,
               lastError: msg,
               updatedAt: new Date(),
-            }).where(eq(clickupBridges.id, bridge.id));
+            }).where(
+              and(
+                eq(clickupBridges.id, bridge.id),
+                inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+              ),
+            );
           }
         }
       }
