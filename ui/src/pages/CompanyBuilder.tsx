@@ -722,7 +722,7 @@ function RuntimeSummaryCard({
   pendingProposals: number;
 }) {
   return (
-    <Card className="border-border/70">
+    <Card className="rounded-2xl border-border/70">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Settings2 className="h-4 w-4" />
@@ -957,7 +957,7 @@ export function CompanyBuilder() {
 
   return (
     <div className="grid h-full gap-4 lg:grid-cols-[minmax(280px,1fr)_minmax(0,2fr)]">
-      <Card className="overflow-hidden border-border/70 lg:min-h-0">
+      <Card className="overflow-hidden rounded-2xl border-border/70 lg:min-h-0">
         <CardHeader className="border-b border-border/70 pb-3">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-sm">Sessions</CardTitle>
@@ -1060,7 +1060,7 @@ export function CompanyBuilder() {
       </Card>
 
       <div className="grid gap-4 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)_auto]">
-        <Card className="overflow-hidden border-border/70 lg:min-h-0">
+        <Card className="overflow-hidden rounded-2xl border-border/70 lg:min-h-0">
           <CardHeader className="border-b border-border/70 pb-3">
             <CardTitle className="text-sm">
               {activeSession ? getSessionDisplayTitle(activeSession) : "Conversation"}
