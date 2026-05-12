@@ -8025,10 +8025,14 @@ export function heartbeatService(db: Db) {
         and(
           inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
           sql`${clickupBridges.id} in (
-            select cast(nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '') as uuid)
-            from ${heartbeatRuns}
-            where ${heartbeatRuns.agentId} = ${agentId}
-              and ${heartbeatRuns.status} = 'succeeded'
+            select cast(bridge_ids.bridge_id as uuid)
+            from (
+              select nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '') as bridge_id
+              from ${heartbeatRuns}
+              where ${heartbeatRuns.agentId} = ${agentId}
+                and ${heartbeatRuns.status} = 'succeeded'
+            ) as bridge_ids
+            where bridge_ids.bridge_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
           )`,
         ),
       );

@@ -583,7 +583,8 @@ export function clickupBridgeService(db: Db) {
           const msg = err instanceof Error ? err.message : String(err);
           const nonRetriableCreateParseFailure = msg.startsWith("clickup create task response parse failed:");
           const nonRetriableNotRunnableBridge = msg.startsWith("clickup bridge not runnable:");
-          const attempts = nonRetriableCreateParseFailure || nonRetriableNotRunnableBridge
+          const nonRetriableMissingBridge = msg.startsWith("clickup bridge missing");
+          const attempts = nonRetriableCreateParseFailure || nonRetriableNotRunnableBridge || nonRetriableMissingBridge
             ? MAX_OUTBOUND_ATTEMPTS
             : event.attempts + 1;
           const terminal = attempts >= MAX_OUTBOUND_ATTEMPTS;
