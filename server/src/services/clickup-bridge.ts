@@ -272,7 +272,12 @@ export function clickupBridgeService(db: Db) {
         })
         .onConflictDoUpdate({
           target: [clickupBridges.companyId, clickupBridges.sourceType, clickupBridges.sourceId, clickupBridges.clickupListId],
-          set: { updatedAt: now, lastError: null },
+          set: {
+            agentId: input.agentId,
+            mode: cfg.mode,
+            updatedAt: now,
+            lastError: null,
+          },
         })
         // Postgres RETURNING yields post-upsert row, including existing status.
         .returning();

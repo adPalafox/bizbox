@@ -1005,6 +1005,86 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     }));
   });
 
+  it("refreshes bridge agentId and mode when wake conflicts with existing bridge", async () => {
+    const companyId = randomUUID();
+    const oldAgentId = randomUUID();
+    const newAgentId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values([
+      {
+        id: oldAgentId,
+        companyId,
+        name: "Old ClickUp Bridge",
+        role: "engineer",
+        status: "running",
+        adapterType: "clickup_agent_ref",
+        adapterConfig: {
+          listId: "list-1",
+          authToken: "token-1",
+          bridgeBotUserId: "bridge-bot-1",
+          triggerMode: "api_comment_only",
+        },
+        runtimeConfig: {},
+        permissions: {},
+      },
+      {
+        id: newAgentId,
+        companyId,
+        name: "New ClickUp Bridge",
+        role: "engineer",
+        status: "running",
+        adapterType: "clickup_agent_ref",
+        adapterConfig: {
+          listId: "list-1",
+          authToken: "token-1",
+          bridgeBotUserId: "bridge-bot-1",
+          triggerMode: "automation_trigger",
+        },
+        runtimeConfig: {},
+        permissions: {},
+      },
+    ]);
+
+    const svc = clickupBridgeService(db);
+    await svc.enqueueFromWake({
+      companyId,
+      agentId: oldAgentId,
+      context: { paperclipWake: { issue: { id: issueId } } },
+      config: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+        triggerMode: "api_comment_only",
+      },
+    });
+
+    await svc.enqueueFromWake({
+      companyId,
+      agentId: newAgentId,
+      context: { paperclipWake: { issue: { id: issueId } } },
+      config: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+        triggerMode: "automation_trigger",
+      },
+    });
+
+    const [bridge] = await db.select().from(clickupBridges).where(eq(clickupBridges.companyId, companyId));
+    expect(bridge).toEqual(expect.objectContaining({
+      agentId: newAgentId,
+      mode: "automation_trigger",
+    }));
+  });
+
   it("builds a stable structured outbound ClickUp message from the issue context", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();
