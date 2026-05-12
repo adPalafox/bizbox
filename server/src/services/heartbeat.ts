@@ -8013,22 +8013,25 @@ export function heartbeatService(db: Db) {
       await releaseIssueExecutionAndPromote(run);
     }
 
-    const succeededClickupRuns = await db
-      .select({ resultJson: heartbeatRuns.resultJson })
-      .from(heartbeatRuns)
+    await db
+      .update(clickupBridges)
+      .set({
+        status: "closed",
+        nextPollAt: null,
+        lastError: reason,
+        updatedAt: new Date(),
+      })
       .where(
         and(
-          eq(heartbeatRuns.agentId, agentId),
-          eq(heartbeatRuns.status, "succeeded"),
-          sql`${heartbeatRuns.resultJson} ->> 'clickupBridgeId' is not null`,
-          sql`nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '') is not null`,
+          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
+          sql`${clickupBridges.id} in (
+            select nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '')
+            from ${heartbeatRuns}
+            where ${heartbeatRuns.agentId} = ${agentId}
+              and ${heartbeatRuns.status} = 'succeeded'
+          )`,
         ),
-      )
-      .orderBy(desc(heartbeatRuns.finishedAt), desc(heartbeatRuns.updatedAt), desc(heartbeatRuns.createdAt));
-
-    for (const succeededClickupRun of succeededClickupRuns) {
-      await closeClickUpBridgeForRun(succeededClickupRun, reason);
-    }
+      );
 
     return runs.length;
   }

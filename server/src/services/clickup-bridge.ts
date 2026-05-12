@@ -759,7 +759,7 @@ export function clickupBridgeService(db: Db) {
             lastPolledAt: new Date(),
             nextPollAt: nextPollAt(Date.now(), bridge.lastOutboundAt, bridge.lastPolledAt),
             consecutivePollFailures: 0,
-            status: "waiting_for_agent_reply",
+            status: candidates.length > 0 ? "agent_replied" : "waiting_for_agent_reply",
             lastError: null,
             updatedAt: new Date(),
           }).where(and(eq(clickupBridges.id, bridge.id), eq(clickupBridges.status, "waiting_for_agent_reply")));
