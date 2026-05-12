@@ -708,17 +708,17 @@ export function clickupBridgeService(db: Db) {
             status: "waiting_for_agent_reply",
             lastError: null,
             updatedAt: new Date(),
-          }).where(eq(clickupBridges.id, bridge.id));
+          }).where(and(eq(clickupBridges.id, bridge.id), eq(clickupBridges.status, "waiting_for_agent_reply")));
         } catch (err) {
           const failures = (bridge.consecutivePollFailures ?? 0) + 1;
           await db.update(clickupBridges).set({
             consecutivePollFailures: failures,
-            status: failures >= MAX_POLL_FAILURES ? "failed" : bridge.status,
+            status: failures >= MAX_POLL_FAILURES ? "failed" : "waiting_for_agent_reply",
             lastError: err instanceof Error ? err.message : String(err),
             lastPolledAt: new Date(),
             nextPollAt: nextRetryAt(Math.min(failures, 5)),
             updatedAt: new Date(),
-          }).where(eq(clickupBridges.id, bridge.id));
+          }).where(and(eq(clickupBridges.id, bridge.id), eq(clickupBridges.status, "waiting_for_agent_reply")));
         }
       }
     },
