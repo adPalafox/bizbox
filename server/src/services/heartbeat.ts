@@ -7665,7 +7665,7 @@ export function heartbeatService(db: Db) {
       await releaseIssueExecutionAndPromote(run);
     }
 
-    const [latestSucceededClickupRun] = await db
+    const succeededClickupRuns = await db
       .select({ resultJson: heartbeatRuns.resultJson })
       .from(heartbeatRuns)
       .where(
@@ -7676,11 +7676,10 @@ export function heartbeatService(db: Db) {
           sql`nullif(${heartbeatRuns.resultJson} ->> 'clickupBridgeId', '') is not null`,
         ),
       )
-      .orderBy(desc(heartbeatRuns.finishedAt), desc(heartbeatRuns.updatedAt), desc(heartbeatRuns.createdAt))
-      .limit(1);
+      .orderBy(desc(heartbeatRuns.finishedAt), desc(heartbeatRuns.updatedAt), desc(heartbeatRuns.createdAt));
 
-    if (latestSucceededClickupRun) {
-      await closeClickUpBridgeForRun(latestSucceededClickupRun, reason);
+    for (const succeededClickupRun of succeededClickupRuns) {
+      await closeClickUpBridgeForRun(succeededClickupRun, reason);
     }
 
     return runs.length;

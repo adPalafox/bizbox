@@ -1011,7 +1011,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(bridge?.nextPollAt).toBeNull();
   });
 
-  it("closes an active ClickUp bridge when cancelling active work for an agent with only succeeded ClickUp runs", async () => {
+  it("closes all active ClickUp bridges when cancelling active work for an agent with succeeded ClickUp runs", async () => {
     const { companyId, agentId, runId } = await seedRunFixture({
       adapterType: "clickup_agent_ref",
       agentStatus: "running",
@@ -1019,20 +1019,37 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       runStatus: "succeeded",
     });
     const bridgeId = randomUUID();
+    const secondBridgeId = randomUUID();
+    const secondRunId = randomUUID();
+    const secondWakeupRequestId = randomUUID();
     const heartbeat = heartbeatService(db);
 
-    await db.insert(clickupBridges).values({
-      id: bridgeId,
-      companyId,
-      agentId,
-      sourceType: "agent_thread",
-      sourceId: "thread-1",
-      taskKey: "agent-thread:thread-1",
-      clickupListId: "list-1",
-      clickupTaskId: "task-1",
-      status: "waiting_for_agent_reply",
-      nextPollAt: new Date("2026-03-19T00:01:00.000Z"),
-    });
+    await db.insert(clickupBridges).values([
+      {
+        id: bridgeId,
+        companyId,
+        agentId,
+        sourceType: "agent_thread",
+        sourceId: "thread-1",
+        taskKey: "agent-thread:thread-1",
+        clickupListId: "list-1",
+        clickupTaskId: "task-1",
+        status: "waiting_for_agent_reply",
+        nextPollAt: new Date("2026-03-19T00:01:00.000Z"),
+      },
+      {
+        id: secondBridgeId,
+        companyId,
+        agentId,
+        sourceType: "agent_thread",
+        sourceId: "thread-2",
+        taskKey: "agent-thread:thread-2",
+        clickupListId: "list-1",
+        clickupTaskId: "task-2",
+        status: "waiting_for_agent_reply",
+        nextPollAt: new Date("2026-03-19T00:02:00.000Z"),
+      },
+    ]);
 
     await db
       .update(heartbeatRuns)
@@ -1045,17 +1062,51 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       })
       .where(eq(heartbeatRuns.id, runId));
 
+    await db.insert(agentWakeupRequests).values({
+      id: secondWakeupRequestId,
+      companyId,
+      agentId,
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_assigned",
+      payload: {},
+      status: "succeeded",
+      runId: secondRunId,
+      claimedAt: new Date("2026-03-19T00:03:00.000Z"),
+      finishedAt: new Date("2026-03-19T00:03:30.000Z"),
+    });
+
+    await db.insert(heartbeatRuns).values({
+      id: secondRunId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "succeeded",
+      wakeupRequestId: secondWakeupRequestId,
+      contextSnapshot: {},
+      resultJson: {
+        clickupBridgeId: secondBridgeId,
+        status: "pending_external",
+        pollingActive: true,
+      },
+      startedAt: new Date("2026-03-19T00:03:00.000Z"),
+      finishedAt: new Date("2026-03-19T00:03:30.000Z"),
+      updatedAt: new Date("2026-03-19T00:03:30.000Z"),
+    });
+
     const cancelledCount = await heartbeat.cancelActiveForAgent(agentId);
 
     expect(cancelledCount).toBe(0);
 
-    const [bridge] = await db
+    const bridges = await db
       .select()
       .from(clickupBridges)
-      .where(eq(clickupBridges.id, bridgeId));
+      .where(inArray(clickupBridges.id, [bridgeId, secondBridgeId]));
 
-    expect(bridge?.status).toBe("closed");
-    expect(bridge?.nextPollAt).toBeNull();
+    expect(bridges).toHaveLength(2);
+    expect(bridges.every((bridge) => bridge.status === "closed")).toBe(true);
+    expect(bridges.every((bridge) => bridge.nextPollAt === null)).toBe(true);
   });
 
   it("closes an active ClickUp bridge when stopping a synthetic live run backed by a succeeded heartbeat run", async () => {
