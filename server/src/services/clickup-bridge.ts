@@ -254,7 +254,10 @@ export function clickupBridgeService(db: Db) {
   return {
     async closeActiveBridges(reason: string, companyId?: string) {
       const filters = [
-        eq(clickupBridges.status, "waiting_for_agent_reply"),
+        or(
+          eq(clickupBridges.status, "waiting_for_agent_reply"),
+          eq(clickupBridges.status, "pending_clickup_task"),
+        ),
         ...(companyId ? [eq(clickupBridges.companyId, companyId)] : []),
       ];
       return db
@@ -392,7 +395,17 @@ export function clickupBridgeService(db: Db) {
 
       for (const event of events) {
         if (event.attempts >= MAX_OUTBOUND_ATTEMPTS) continue;
-        await db.update(clickupOutboundEvents).set({ status: "processing", updatedAt: new Date() }).where(eq(clickupOutboundEvents.id, event.id));
+        const [claimedEvent] = await db
+          .update(clickupOutboundEvents)
+          .set({ status: "processing", updatedAt: new Date() })
+          .where(
+            and(
+              eq(clickupOutboundEvents.id, event.id),
+              or(eq(clickupOutboundEvents.status, "pending"), eq(clickupOutboundEvents.status, "failed")),
+            ),
+          )
+          .returning({ id: clickupOutboundEvents.id });
+        if (!claimedEvent) continue;
 
         let bridge = await db.select().from(clickupBridges).where(eq(clickupBridges.id, event.bridgeId)).then((rows) => rows[0] ?? null);
 

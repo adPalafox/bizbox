@@ -927,6 +927,17 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
       nextPollAt: new Date(),
     }).returning();
 
+    const [pendingBridge] = await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "issue",
+      sourceId: randomUUID(),
+      taskKey: "issue:pending",
+      clickupListId: "list-1",
+      status: "pending_clickup_task",
+      nextPollAt: new Date(),
+    }).returning();
+
     const [otherBridge] = await db.insert(clickupBridges).values({
       companyId: otherCompanyId,
       agentId: otherAgentId,
@@ -940,12 +951,18 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     }).returning();
 
     const closed = await clickupBridgeService(db).closeActiveBridges("shutdown", companyId);
-    expect(closed.map((row) => row.id)).toEqual([activeBridge!.id]);
+    expect(closed.map((row) => row.id).sort()).toEqual([activeBridge!.id, pendingBridge!.id].sort());
 
     const bridges = await db.select().from(clickupBridges);
     const targetBridge = bridges.find((bridge) => bridge.id === activeBridge!.id);
+    const pendingTargetBridge = bridges.find((bridge) => bridge.id === pendingBridge!.id);
     const untouchedBridge = bridges.find((bridge) => bridge.id === otherBridge!.id);
     expect(targetBridge).toEqual(expect.objectContaining({
+      status: "closed",
+      nextPollAt: null,
+      lastError: "shutdown",
+    }));
+    expect(pendingTargetBridge).toEqual(expect.objectContaining({
       status: "closed",
       nextPollAt: null,
       lastError: "shutdown",
