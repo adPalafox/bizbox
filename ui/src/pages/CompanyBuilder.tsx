@@ -605,10 +605,10 @@ function ConversationPane({
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div
         ref={transcriptRef}
-        className="flex-1 space-y-4 overflow-y-auto pr-2"
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-2"
       >
         {isArchived ? (
           <div className="rounded-xl border border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
@@ -1061,7 +1061,7 @@ export function CompanyBuilder() {
               {activeSession ? getSessionDisplayTitle(activeSession) : "Conversation"}
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-4 lg:h-[calc(100vh-18rem)]">
+          <CardContent className="flex min-h-0 flex-col p-4 lg:h-[calc(100vh-18rem)]">
             {detail ? (
               <ConversationPane
                 companyId={selectedCompanyId}
