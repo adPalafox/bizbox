@@ -1,4 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+const mockGetObject = vi.hoisted(() => vi.fn());
+
+vi.mock("../storage/index.js", () => ({
+  getStorageService: () => ({
+    getObject: mockGetObject,
+  }),
+}));
+
 import { escapeLikePattern, workProductService } from "../services/work-products.ts";
 
 function createWorkProductRow(overrides: Partial<Record<string, unknown>> = {}) {
@@ -219,5 +227,61 @@ describe("workProductService", () => {
     expect(items[0]?.contentType).toContain("text/markdown");
     expect(items[0]?.byteSize).toBe(15);
     expect(items[0]?.originalFilename).toBe("company-requirements.md");
+  });
+
+  it("truncates inline document previews by UTF-8 byte length", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([
+        createDeliverableQueryRow({
+          deliverable_source: "document",
+          metadata: null,
+          document_key: "plan",
+          document_format: "markdown",
+          document_body: `${"a".repeat((64 * 1024) - 1)}🙂`,
+          document_byte_size: (64 * 1024) + 3,
+        }),
+      ])
+      .mockResolvedValueOnce([]);
+
+    const svc = workProductService({ execute } as any);
+    const deliverable = await svc.getDeliverableById("deliverable-1");
+
+    expect(deliverable?.preview?.truncated).toBe(true);
+    expect(deliverable?.preview?.body.endsWith("🙂")).toBe(false);
+    expect(Buffer.byteLength(deliverable?.preview?.body ?? "", "utf8")).toBeLessThanOrEqual(64 * 1024);
+  });
+
+  it("returns the deliverable when artifact preview loading fails", async () => {
+    mockGetObject.mockRejectedValueOnce(new Error("storage unavailable"));
+
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([
+        createDeliverableQueryRow({
+          metadata: {
+            attachmentId: "attachment-1",
+            contentPath: "/api/attachments/attachment-1/content",
+            sourcePath: "deliverables/final-report.md",
+            contentType: "text/markdown; charset=utf-8",
+            byteSize: 32,
+            originalFilename: "final-report.md",
+          },
+        }),
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          company_id: "company-1",
+          object_key: "assets/final-report.md",
+        },
+      ]);
+
+    const svc = workProductService({ execute } as any);
+    const deliverable = await svc.getDeliverableById("deliverable-1");
+
+    expect(deliverable?.id).toBe("deliverable-1");
+    expect(deliverable?.preview).toBeNull();
+    expect(mockGetObject).toHaveBeenCalledWith("company-1", "assets/final-report.md");
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DELIVERABLE_AUDIENCES } from "../constants.js";
 
 export const issueWorkProductTypeSchema = z.enum([
   "preview_url",
@@ -163,6 +164,7 @@ const issueWorkProductBaseSchema = z.object({
   url: issueWorkProductUrlSchema.optional().nullable(),
   status: issueWorkProductStatusSchema.default("active"),
   reviewState: issueWorkProductReviewStateSchema.optional().default("none"),
+  audience: z.enum(DELIVERABLE_AUDIENCES).optional().default("human"),
   isPrimary: z.boolean().optional().default(false),
   healthStatus: z.enum(["unknown", "healthy", "unhealthy"]).optional().default("unknown"),
   summary: z.string().optional().nullable(),
