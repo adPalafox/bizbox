@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Package } from "lucide-react";
 import { Link } from "@/lib/router";
@@ -18,16 +18,28 @@ const AUDIENCE_FILTERS: Array<{ value: "all" | DeliverableAudience; label: strin
   { value: "human", label: "Human" },
   { value: "internal", label: "Internal" },
 ];
+const DELIVERABLE_SEARCH_DEBOUNCE_MS = 250;
 
 export function Deliverables() {
   const { selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
+  const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [audience, setAudience] = useState<"all" | DeliverableAudience>("all");
 
   useEffect(() => {
     setBreadcrumbs([{ label: "Deliverables" }]);
   }, [setBreadcrumbs]);
+
+  useEffect(() => {
+    if (searchDraft === search) return;
+    const timeoutId = window.setTimeout(() => {
+      startTransition(() => {
+        setSearch(searchDraft);
+      });
+    }, DELIVERABLE_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchDraft, search]);
 
   const searchTerm = search.trim();
   const { data, isLoading, error } = useQuery({
@@ -42,6 +54,12 @@ export function Deliverables() {
         limit: 200,
       }),
     enabled: !!selectedCompanyId,
+    placeholderData: (previousData, previousQuery) => {
+      const previousKey = Array.isArray(previousQuery?.queryKey) ? previousQuery.queryKey : [];
+      return previousKey[0] === "deliverables" && previousKey[1] === selectedCompanyId
+        ? previousData
+        : undefined;
+    },
   });
 
   const items = data?.items ?? [];
@@ -69,8 +87,8 @@ export function Deliverables() {
             <Input
               type="search"
               placeholder="Search deliverables..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              value={searchDraft}
+              onChange={(event) => setSearchDraft(event.target.value)}
               aria-label="Search deliverables"
             />
             <select
