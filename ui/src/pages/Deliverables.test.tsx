@@ -33,7 +33,8 @@ vi.mock("@/context/BreadcrumbContext", () => ({
 async function flushReact() {
   await act(async () => {
     await Promise.resolve();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    vi.runOnlyPendingTimers();
+    await Promise.resolve();
   });
 }
 
@@ -79,11 +80,14 @@ describe("Deliverables page", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     container.remove();
     document.body.innerHTML = "";
     vi.clearAllMocks();
@@ -150,6 +154,9 @@ describe("Deliverables page", () => {
       valueSetter?.call(input, "draft");
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
 
     await flushReact();
     await flushReact();
@@ -193,12 +200,72 @@ describe("Deliverables page", () => {
       valueSetter?.call(input, "zzz");
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
 
     await flushReact();
     await flushReact();
 
     expect(container.textContent).toContain("No deliverables match your search.");
     expect(container.querySelector('input[type="search"]')).toBeTruthy();
+  });
+
+  it("keeps the search input mounted while a search request is pending", async () => {
+    let resolveSearch: ((value: { items: ReturnType<typeof sampleItem>[]; limit: number; offset: number }) => void) | null = null;
+    listMock.mockImplementation((_companyId: string, filters?: { q?: string }) => {
+      if (filters?.q === "r") {
+        return new Promise((resolve) => {
+          resolveSearch = resolve;
+        });
+      }
+      return Promise.resolve({
+        items: [sampleItem()],
+        limit: 50,
+        offset: 0,
+      });
+    });
+
+    await renderDeliverables(container);
+    await flushReact();
+    await flushReact();
+
+    const input = container.querySelector('input[type="search"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(input, "r");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+    });
+    await flushReact();
+
+    const pendingInput = container.querySelector('input[type="search"]');
+    expect(pendingInput).toBeTruthy();
+    expect(pendingInput?.isConnected).toBe(true);
+    expect((pendingInput as HTMLInputElement).value).toBe("r");
+    expect(container.querySelector("svg.animate-spin")).toBeTruthy();
+    expect(container.querySelector(".opacity-70")).toBeTruthy();
+
+    await act(async () => {
+      resolveSearch?.({
+        items: [sampleItem({ id: "deliverable-2", title: "Recycled draft" })],
+        limit: 50,
+        offset: 0,
+      });
+    });
+
+    await flushReact();
+    await flushReact();
+
+    expect(container.textContent).toContain("Recycled draft");
+    expect(container.querySelector("svg.animate-spin")).toBeNull();
   });
 
   it("keeps the audience filter visible when audience filtering returns zero results", async () => {

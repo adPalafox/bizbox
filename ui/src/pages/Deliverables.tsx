@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, Package } from "lucide-react";
+import { Download, LoaderCircle, Package } from "lucide-react";
 import { Link } from "@/lib/router";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
@@ -18,10 +18,12 @@ const AUDIENCE_FILTERS: Array<{ value: "all" | DeliverableAudience; label: strin
   { value: "human", label: "Human" },
   { value: "internal", label: "Internal" },
 ];
+const DELIVERABLE_SEARCH_DEBOUNCE_MS = 250;
 
 export function Deliverables() {
   const { selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
+  const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [audience, setAudience] = useState<"all" | DeliverableAudience>("all");
 
@@ -29,8 +31,17 @@ export function Deliverables() {
     setBreadcrumbs([{ label: "Deliverables" }]);
   }, [setBreadcrumbs]);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      startTransition(() => {
+        setSearch(searchDraft);
+      });
+    }, DELIVERABLE_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchDraft]);
+
   const searchTerm = search.trim();
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isFetching, error } = useQuery({
     queryKey: queryKeys.deliverables.list(selectedCompanyId!, {
       q: searchTerm || undefined,
       audience: audience === "all" ? undefined : audience,
@@ -42,6 +53,12 @@ export function Deliverables() {
         limit: 200,
       }),
     enabled: !!selectedCompanyId,
+    placeholderData: (previousData, previousQuery) => {
+      const previousKey = Array.isArray(previousQuery?.queryKey) ? previousQuery.queryKey : [];
+      return previousKey[0] === "deliverables" && previousKey[1] === selectedCompanyId
+        ? previousData
+        : undefined;
+    },
   });
 
   const items = data?.items ?? [];
@@ -66,13 +83,22 @@ export function Deliverables() {
         </div>
         {items.length > 0 || searchTerm || audience !== "all" ? (
           <div className="flex w-full max-w-md gap-2">
-            <Input
-              type="search"
-              placeholder="Search deliverables..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              aria-label="Search deliverables"
-            />
+            <div className="relative flex-1">
+              <Input
+                type="search"
+                placeholder="Search deliverables..."
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
+                aria-label="Search deliverables"
+                className={isFetching ? "pr-9" : undefined}
+              />
+              {isFetching ? (
+                <LoaderCircle
+                  aria-hidden="true"
+                  className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+                />
+              ) : null}
+            </div>
             <select
               value={audience}
               onChange={(event) => setAudience(event.target.value as "all" | DeliverableAudience)}
@@ -101,7 +127,11 @@ export function Deliverables() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-md border border-border">
+        <div
+          className={`overflow-hidden rounded-md border border-border transition-opacity ${
+            isFetching ? "opacity-70" : "opacity-100"
+          }`}
+        >
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
               <tr>
