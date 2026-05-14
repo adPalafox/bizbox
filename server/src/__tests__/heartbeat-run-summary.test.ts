@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   summarizeHeartbeatRunResultJson,
   buildHeartbeatRunIssueComment,
+  extractHeartbeatRunImportedIssueComments,
   extractHeartbeatRunIssueDocumentPromotions,
   mergeHeartbeatRunResultJson,
 } from "../services/heartbeat-run-summary.js";
@@ -79,8 +80,36 @@ describe("buildHeartbeatRunIssueComment", () => {
     expect(buildHeartbeatRunIssueComment({ message: "completed" })).toBe("completed");
   });
 
+  it("returns imported ClickUp replies when no summary text exists", () => {
+    expect(
+      buildHeartbeatRunIssueComment({
+        importedIssueComments: [
+          { body: "ClickUp reply from Risk Witherspoon:\n\nLooks risky." },
+          { body: "Second imported reply." },
+        ],
+      }),
+    ).toBe("ClickUp reply from Risk Witherspoon:\n\nLooks risky.\n\nSecond imported reply.");
+  });
+
+  it("appends imported ClickUp replies after the main summary", () => {
+    expect(
+      buildHeartbeatRunIssueComment({
+        summary: "## Summary\n\nPosted update.",
+        importedIssueComments: [{ body: "ClickUp reply from Risk Witherspoon:\n\nLooks risky." }],
+      }),
+    ).toBe("## Summary\n\nPosted update.\n\n---\n\nClickUp reply from Risk Witherspoon:\n\nLooks risky.");
+  });
+
   it("returns null when there is no usable final text", () => {
     expect(buildHeartbeatRunIssueComment({ costUsd: 1.2 })).toBeNull();
+  });
+
+  it("suppresses bridge status posts while the live polling run is active", () => {
+    expect(buildHeartbeatRunIssueComment({
+      status: "pending_external",
+      pollingActive: true,
+      summary: "ClickUp bridge active: outbound sent, polling for external replies.",
+    })).toBeNull();
   });
 });
 
@@ -180,5 +209,24 @@ describe("mergeHeartbeatRunResultJson", () => {
       summary: "adapter result",
       stdout: "raw stdout",
     });
+  });
+});
+
+describe("extractHeartbeatRunImportedIssueComments", () => {
+  it("returns normalized imported issue comment bodies", () => {
+    expect(
+      extractHeartbeatRunImportedIssueComments({
+        importedIssueComments: [
+          { body: " ClickUp reply from Risk Witherspoon:\n\nLooks risky. " },
+          { body: "" },
+          { nope: true },
+        ],
+      }),
+    ).toEqual(["ClickUp reply from Risk Witherspoon:\n\nLooks risky."]);
+  });
+
+  it("returns an empty list for missing or invalid payloads", () => {
+    expect(extractHeartbeatRunImportedIssueComments(null)).toEqual([]);
+    expect(extractHeartbeatRunImportedIssueComments({ importedIssueComments: "nope" })).toEqual([]);
   });
 });

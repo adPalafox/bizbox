@@ -370,6 +370,25 @@ export interface ServerAdapterModule {
    * rather than reading config.paperclipRuntimeSkills.
    */
   requiresMaterializedRuntimeSkills?: boolean;
+
+  /**
+   * Whether the host should expect an assigned in-progress issue to maintain
+   * a live Bizbox execution path for automatic continuation recovery.
+   *
+   * Default behavior is true. Bridge/reference adapters that dispatch work to
+   * an external system and intentionally finish their local Bizbox run should
+   * set this to false.
+   */
+  requiresLiveExecutionPath?: boolean;
+
+  /**
+   * How server heartbeat wakeups should dispatch this adapter.
+   *
+   * Most adapters execute directly. Bridge/reference adapters can declare an
+   * explicit alternate server wakeup contract while still exposing execute()
+   * for CLI flows and tests.
+   */
+  serverHeartbeatExecutionMode?: "execute" | "clickup_bridge";
 }
 
 // ---------------------------------------------------------------------------

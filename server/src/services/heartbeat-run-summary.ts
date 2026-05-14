@@ -23,6 +23,10 @@ function readCommentText(value: unknown) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isPendingExternalPollingResult(resultJson: Record<string, unknown>) {
+  return resultJson.status === "pending_external" && resultJson.pollingActive === true;
+}
+
 function slugifyDocumentKey(value: string) {
   const normalized = value
     .trim()
@@ -171,18 +175,49 @@ export function buildHeartbeatRunIssueComment(
   if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) {
     return null;
   }
-
-  const comment =
-    readCommentText(resultJson.summary)
-    ?? readCommentText(resultJson.result)
-    ?? readCommentText(resultJson.message)
-    ?? null;
-
-  if (!comment) {
+  if (isPendingExternalPollingResult(resultJson)) {
     return null;
   }
 
-  return readCommentText(stripTaggedIssueDocuments(comment));
+  const primaryComment = readCommentText(
+    stripTaggedIssueDocuments(
+      readCommentText(resultJson.summary)
+      ?? readCommentText(resultJson.result)
+      ?? readCommentText(resultJson.message)
+      ?? "",
+    ),
+  );
+  const importedComments = extractHeartbeatRunImportedIssueComments(resultJson);
+
+  if (primaryComment && importedComments.length === 0) {
+    return primaryComment;
+  }
+  if (!primaryComment && importedComments.length === 0) {
+    return null;
+  }
+  if (!primaryComment) {
+    return importedComments.join("\n\n");
+  }
+
+  return `${primaryComment}\n\n---\n\n${importedComments.join("\n\n")}`;
+}
+
+export function extractHeartbeatRunImportedIssueComments(
+  resultJson: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) {
+    return [];
+  }
+
+  const rawComments = resultJson.importedIssueComments;
+  if (!Array.isArray(rawComments)) return [];
+
+  return rawComments
+    .map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+      return readCommentText((entry as Record<string, unknown>).body);
+    })
+    .filter((body): body is string => body !== null);
 }
 
 export function extractHeartbeatRunIssueDocumentPromotions(

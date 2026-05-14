@@ -2791,7 +2791,18 @@ export function issueService(db: Db) {
     addComment: async (
       issueId: string,
       body: string,
-      actor: { agentId?: string; userId?: string; runId?: string | null },
+      actor: {
+        agentId?: string;
+        userId?: string;
+        runId?: string | null;
+        provenance?: {
+          source: "native" | "clickup_bridge";
+          clickupBridgeId?: string | null;
+          clickupExternalMessageId?: string | null;
+          clickupExternalAuthorId?: string | null;
+          clickupExternalAuthorName?: string | null;
+        };
+      },
     ) => {
       const issue = await db
         .select({
@@ -2820,9 +2831,30 @@ export function issueService(db: Db) {
           authorAgentId: actor.agentId ?? null,
           authorUserId: actor.userId ?? null,
           createdByRunId: actor.runId ?? null,
+          source: actor.provenance?.source ?? "native",
+          clickupBridgeId: actor.provenance?.clickupBridgeId ?? null,
+          clickupExternalMessageId: actor.provenance?.clickupExternalMessageId ?? null,
+          clickupExternalAuthorId: actor.provenance?.clickupExternalAuthorId ?? null,
+          clickupExternalAuthorName: actor.provenance?.clickupExternalAuthorName ?? null,
           body: redactedBody,
         })
+        .onConflictDoNothing()
         .returning();
+
+      const persistedComment = comment
+        ?? (
+          actor.provenance?.clickupExternalMessageId
+            ? await db
+              .select()
+              .from(issueComments)
+              .where(eq(issueComments.clickupExternalMessageId, actor.provenance.clickupExternalMessageId))
+              .then((rows) => rows[0] ?? null)
+            : null
+        );
+
+      if (!persistedComment) {
+        throw conflict("Issue comment insert did not persist");
+      }
 
       // Update issue's updatedAt so comment activity is reflected in recency sorting
       await db
@@ -2849,18 +2881,18 @@ export function issueService(db: Db) {
           issue_id: issueId,
           issue_identifier: issue.identifier ?? undefined,
           issue_status: issue.status,
-          comment_id: comment.id,
+          comment_id: persistedComment.id,
           commenter_id: actor.userId,
           assignee_agent_id: issue.assigneeAgentId ?? undefined,
           assignee_user_id: issue.assigneeUserId ?? undefined,
-          body_length: comment.body.length,
+          body_length: persistedComment.body.length,
         });
       }
 
       if (actor.userId) {
         // Track human intervention only for agent-managed issues.
         if (!issue.assigneeAgentId) {
-          return redactIssueComment(comment, currentUserRedactionOptions.enabled);
+          return redactIssueComment(persistedComment, currentUserRedactionOptions.enabled);
         }
 
         await markHumanIntervened({
@@ -2874,7 +2906,7 @@ export function issueService(db: Db) {
         });
       }
 
-      return redactIssueComment(comment, currentUserRedactionOptions.enabled);
+      return redactIssueComment(persistedComment, currentUserRedactionOptions.enabled);
     },
 
     createAttachment: async (input: {

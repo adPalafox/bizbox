@@ -7,6 +7,7 @@ import {
   agents,
   agentRuntimeState,
   agentWakeupRequests,
+  clickupBridges,
   companySkills,
   companies,
   createDb,
@@ -69,8 +70,9 @@ vi.mock("../adapters/index.ts", async () => {
   const actual = await vi.importActual<typeof import("../adapters/index.ts")>("../adapters/index.ts");
   return {
     ...actual,
-    getServerAdapter: vi.fn(() => ({
+    getServerAdapter: vi.fn((adapterType?: string) => ({
       supportsLocalAgentJwt: false,
+      requiresLiveExecutionPath: adapterType === "clickup_agent_ref" ? false : undefined,
       execute: mockAdapterExecute,
     })),
   };
@@ -324,6 +326,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     await db.delete(documentRevisions);
     await db.delete(documents);
     await db.delete(issueRelations);
+    await db.delete(clickupBridges);
     await db.delete(routineRuns);
     await db.delete(routines);
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -487,7 +490,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       name: "CodexCoder",
       role: "engineer",
       status: "idle",
-      adapterType: "codex_local",
+      adapterType: input.adapterType ?? "codex_local",
       adapterConfig: {},
       runtimeConfig: {},
       permissions: {},
@@ -977,6 +980,194 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     });
   });
 
+  it("closes an active ClickUp bridge when its run is cancelled", async () => {
+    const { companyId, agentId, runId } = await seedRunFixture({
+      adapterType: "clickup_agent_ref",
+      agentStatus: "running",
+      includeIssue: false,
+    });
+    const bridgeId = randomUUID();
+    const heartbeat = heartbeatService(db);
+
+    await db.insert(clickupBridges).values({
+      id: bridgeId,
+      companyId,
+      agentId,
+      sourceType: "agent_thread",
+      sourceId: "thread-1",
+      taskKey: "agent-thread:thread-1",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date("2026-03-19T00:01:00.000Z"),
+    });
+
+    await db
+      .update(heartbeatRuns)
+      .set({
+        resultJson: {
+          clickupBridgeId: bridgeId,
+          status: "pending_external",
+        },
+      })
+      .where(eq(heartbeatRuns.id, runId));
+
+    await heartbeat.cancelRun(runId);
+
+    const [bridge] = await db
+      .select()
+      .from(clickupBridges)
+      .where(eq(clickupBridges.id, bridgeId));
+
+    expect(bridge?.status).toBe("closed");
+    expect(bridge?.nextPollAt).toBeNull();
+  });
+
+  it("closes all active ClickUp bridges when cancelling active work for an agent with succeeded ClickUp runs", async () => {
+    const { companyId, agentId, runId } = await seedRunFixture({
+      adapterType: "clickup_agent_ref",
+      agentStatus: "running",
+      includeIssue: false,
+      runStatus: "succeeded",
+    });
+    const bridgeId = randomUUID();
+    const secondBridgeId = randomUUID();
+    const secondRunId = randomUUID();
+    const secondWakeupRequestId = randomUUID();
+    const heartbeat = heartbeatService(db);
+
+    await db.insert(clickupBridges).values([
+      {
+        id: bridgeId,
+        companyId,
+        agentId,
+        sourceType: "agent_thread",
+        sourceId: "thread-1",
+        taskKey: "agent-thread:thread-1",
+        clickupListId: "list-1",
+        clickupTaskId: "task-1",
+        status: "waiting_for_agent_reply",
+        nextPollAt: new Date("2026-03-19T00:01:00.000Z"),
+      },
+      {
+        id: secondBridgeId,
+        companyId,
+        agentId,
+        sourceType: "agent_thread",
+        sourceId: "thread-2",
+        taskKey: "agent-thread:thread-2",
+        clickupListId: "list-1",
+        clickupTaskId: "task-2",
+        status: "waiting_for_agent_reply",
+        nextPollAt: new Date("2026-03-19T00:02:00.000Z"),
+      },
+    ]);
+
+    await db
+      .update(heartbeatRuns)
+      .set({
+        resultJson: {
+          clickupBridgeId: bridgeId,
+          status: "pending_external",
+          pollingActive: true,
+        },
+      })
+      .where(eq(heartbeatRuns.id, runId));
+
+    await db.insert(agentWakeupRequests).values({
+      id: secondWakeupRequestId,
+      companyId,
+      agentId,
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_assigned",
+      payload: {},
+      status: "succeeded",
+      runId: secondRunId,
+      claimedAt: new Date("2026-03-19T00:03:00.000Z"),
+      finishedAt: new Date("2026-03-19T00:03:30.000Z"),
+    });
+
+    await db.insert(heartbeatRuns).values({
+      id: secondRunId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "succeeded",
+      wakeupRequestId: secondWakeupRequestId,
+      contextSnapshot: {},
+      resultJson: {
+        clickupBridgeId: secondBridgeId,
+        status: "pending_external",
+        pollingActive: true,
+      },
+      startedAt: new Date("2026-03-19T00:03:00.000Z"),
+      finishedAt: new Date("2026-03-19T00:03:30.000Z"),
+      updatedAt: new Date("2026-03-19T00:03:30.000Z"),
+    });
+
+    const cancelledCount = await heartbeat.cancelActiveForAgent(agentId);
+
+    expect(cancelledCount).toBe(0);
+
+    const bridges = await db
+      .select()
+      .from(clickupBridges)
+      .where(inArray(clickupBridges.id, [bridgeId, secondBridgeId]));
+
+    expect(bridges).toHaveLength(2);
+    expect(bridges.every((bridge) => bridge.status === "closed")).toBe(true);
+    expect(bridges.every((bridge) => bridge.nextPollAt === null)).toBe(true);
+  });
+
+  it("closes an active ClickUp bridge when stopping a synthetic live run backed by a succeeded heartbeat run", async () => {
+    const { companyId, agentId, runId } = await seedRunFixture({
+      adapterType: "clickup_agent_ref",
+      agentStatus: "idle",
+      includeIssue: false,
+      runStatus: "succeeded",
+    });
+    const bridgeId = randomUUID();
+    const heartbeat = heartbeatService(db);
+
+    await db.insert(clickupBridges).values({
+      id: bridgeId,
+      companyId,
+      agentId,
+      sourceType: "agent_thread",
+      sourceId: "thread-1",
+      taskKey: "agent-thread:thread-1",
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date("2026-03-19T00:01:00.000Z"),
+    });
+
+    await db
+      .update(heartbeatRuns)
+      .set({
+        resultJson: {
+          clickupBridgeId: bridgeId,
+          status: "pending_external",
+          pollingActive: true,
+        },
+      })
+      .where(eq(heartbeatRuns.id, runId));
+
+    const returned = await heartbeat.cancelRun(runId);
+
+    expect(returned?.status).toBe("succeeded");
+
+    const [bridge] = await db
+      .select()
+      .from(clickupBridges)
+      .where(eq(clickupBridges.id, bridgeId));
+
+    expect(bridge?.status).toBe("closed");
+    expect(bridge?.nextPollAt).toBeNull();
+  });
+
   it("re-enqueues assigned todo work when the last issue run died and no wake remains", async () => {
     const { agentId, issueId, runId } = await seedStrandedIssueFixture({
       status: "todo",
@@ -1271,6 +1462,36 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     if (retryRun) {
       await waitForRunToSettle(heartbeat, retryRun.id);
     }
+  });
+
+  it("skips stranded continuation recovery for adapters without live execution paths", async () => {
+    const { agentId, issueId } = await seedStrandedIssueFixture({
+      status: "in_progress",
+      runStatus: "failed",
+      adapterType: "clickup_agent_ref",
+    });
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+    expect(result.dispatchRequeued).toBe(0);
+    expect(result.continuationRequeued).toBe(0);
+    expect(result.escalated).toBe(0);
+    expect(result.issueIds).toEqual([]);
+
+    const runs = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.agentId, agentId));
+    expect(runs).toHaveLength(1);
+
+    const wakeups = await db
+      .select()
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.agentId, agentId));
+    expect(wakeups).toHaveLength(1);
+
+    const [issue] = await db.select().from(issues).where(eq(issues.id, issueId));
+    expect(issue?.status).toBe("in_progress");
   });
 
   it("does not continue seeded in-progress work that has no run linkage", async () => {

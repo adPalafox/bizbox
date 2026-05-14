@@ -63,6 +63,14 @@ import {
   agentConfigurationDoc as ottoAgentConfigurationDoc,
   models as ottoAgentModels,
 } from "@paperclipai/adapter-otto-agent";
+import {
+  execute as clickUpAgentRefExecute,
+  testEnvironment as clickUpAgentRefTestEnvironment,
+} from "@paperclipai/adapter-clickup-agent-ref/server";
+import {
+  agentConfigurationDoc as clickUpAgentRefConfigurationDoc,
+  models as clickUpAgentRefModels,
+} from "@paperclipai/adapter-clickup-agent-ref";
 import { listCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
@@ -216,6 +224,21 @@ const ottoAgentAdapter: ServerAdapterModule = {
   agentConfigurationDoc: ottoAgentConfigurationDoc,
 };
 
+const clickUpAgentRefAdapter: ServerAdapterModule = {
+  type: "clickup_agent_ref",
+  execute: clickUpAgentRefExecute,
+  testEnvironment: clickUpAgentRefTestEnvironment,
+  models: clickUpAgentRefModels,
+  supportsLocalAgentJwt: false,
+  supportsInstructionsBundle: false,
+  requiresMaterializedRuntimeSkills: false,
+  requiresLiveExecutionPath: false,
+  // Server heartbeats enqueue bridge work instead of invoking execute();
+  // execute remains available for CLI/test flows.
+  serverHeartbeatExecutionMode: "clickup_bridge",
+  agentConfigurationDoc: clickUpAgentRefConfigurationDoc,
+};
+
 const openCodeLocalAdapter: ServerAdapterModule = {
   type: "opencode_local",
   execute: openCodeExecute,
@@ -337,6 +360,7 @@ function registerBuiltInAdapters() {
     geminiLocalAdapter,
     openclawGatewayAdapter,
     ottoAgentAdapter,
+    clickUpAgentRefAdapter,
     hermesLocalAdapter,
     processAdapter,
     httpAdapter,
@@ -438,7 +462,14 @@ export function requireServerAdapter(type: string): ServerAdapterModule {
 }
 
 export function getServerAdapter(type: string): ServerAdapterModule {
-  return findActiveServerAdapter(type) ?? processAdapter;
+  const active = findActiveServerAdapter(type);
+  if (active) return active;
+
+  // Defensive fallback for built-in adapters that must never degrade into the
+  // generic process adapter due to registry churn during dev hot reloads.
+  if (type === "clickup_agent_ref") return clickUpAgentRefAdapter;
+
+  return processAdapter;
 }
 
 export async function listAdapterModels(type: string): Promise<{ id: string; label: string }[]> {

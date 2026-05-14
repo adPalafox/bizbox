@@ -265,6 +265,11 @@ export interface IssueComment {
   issueId: string;
   authorAgentId: string | null;
   authorUserId: string | null;
+  source?: "native" | "clickup_bridge";
+  clickupBridgeId?: string | null;
+  clickupExternalMessageId?: string | null;
+  clickupExternalAuthorId?: string | null;
+  clickupExternalAuthorName?: string | null;
   body: string;
   createdAt: Date;
   updatedAt: Date;

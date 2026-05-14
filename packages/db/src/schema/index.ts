@@ -52,6 +52,8 @@ export { issueAttachments } from "./issue_attachments.js";
 export { documents } from "./documents.js";
 export { documentRevisions } from "./document_revisions.js";
 export { issueDocuments } from "./issue_documents.js";
+export { clickupBridges } from "./clickup_bridges.js";
+export { clickupOutboundEvents } from "./clickup_outbound_events.js";
 export { heartbeatRuns } from "./heartbeat_runs.js";
 export { heartbeatRunEvents } from "./heartbeat_run_events.js";
 export { costEvents } from "./cost_events.js";

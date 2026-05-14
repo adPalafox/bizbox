@@ -512,6 +512,13 @@
       "when": 1778679360000,
       "tag": "0072_deliverable_audience",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1778600000000,
+      "tag": "0073_clickup_bridge",
+      "breakpoints": true
     }
   ]
 }

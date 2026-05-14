@@ -23,6 +23,7 @@ const KNOWN_DEFAULTS: Record<string, AdapterCapabilities> = {
   pi_local: { supportsInstructionsBundle: true, supportsSkills: true, supportsLocalAgentJwt: true, requiresMaterializedRuntimeSkills: true },
   hermes_local: { supportsInstructionsBundle: false, supportsSkills: true, supportsLocalAgentJwt: true, requiresMaterializedRuntimeSkills: false },
   openclaw_gateway: ALL_FALSE,
+  clickup_agent_ref: ALL_FALSE,
 };
 
 /**

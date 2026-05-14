@@ -33,6 +33,7 @@ import {
   heartbeatService,
   instanceSettingsService,
   issueService,
+  clickupBridgeService,
   reconcilePersistedRuntimeServicesOnStartup,
   routineService,
 } from "./services/index.js";
@@ -762,6 +763,34 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "periodic heartbeat recovery failed");
         });
     }, config.heartbeatSchedulerIntervalMs);
+
+    let clickupOutboundRunning = false;
+    let clickupInboundRunning = false;
+    setInterval(() => {
+      if (!clickupOutboundRunning) {
+        clickupOutboundRunning = true;
+        void heartbeat
+          .processClickupOutbound()
+          .catch((err) => {
+            logger.error({ err }, "clickup outbound worker failed");
+          })
+          .finally(() => {
+            clickupOutboundRunning = false;
+          });
+      }
+
+      if (!clickupInboundRunning) {
+        clickupInboundRunning = true;
+        void heartbeat
+          .pollClickupInbound()
+          .catch((err) => {
+            logger.error({ err }, "clickup inbound poller failed");
+          })
+          .finally(() => {
+            clickupInboundRunning = false;
+          });
+      }
+    }, 1_000);
   }
   
   if (config.databaseBackupEnabled) {
@@ -869,6 +898,15 @@ export async function startServer(): Promise<StartedServer> {
         await telemetryClient.flush();
       }
       await shutdownOtel();
+
+      try {
+        const closed = await clickupBridgeService(db).closeActiveBridges(`Closed during server shutdown (${signal})`);
+        if (closed.length > 0) {
+          logger.info({ signal, closedBridgeCount: closed.length }, "Closed active ClickUp bridges during shutdown");
+        }
+      } catch (err) {
+        logger.error({ err, signal }, "Failed to close active ClickUp bridges during shutdown");
+      }
 
       if (embeddedPostgres && embeddedPostgresStartedByThisProcess) {
         logger.info({ signal }, "Stopping embedded PostgreSQL");

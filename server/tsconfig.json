@@ -2,7 +2,12 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@paperclipai/adapter-clickup-agent-ref": ["../packages/adapters/clickup-agent-ref/dist/index.d.ts"],
+      "@paperclipai/adapter-clickup-agent-ref/server": ["../packages/adapters/clickup-agent-ref/dist/server/index.d.ts"]
+    }
   },
   "include": ["src"],
   "exclude": ["src/__tests__"]

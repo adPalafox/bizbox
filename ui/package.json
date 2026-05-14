@@ -38,6 +38,7 @@
     "@paperclipai/adapter-codex-local": "workspace:*",
     "@paperclipai/adapter-cursor-local": "workspace:*",
     "@paperclipai/adapter-gemini-local": "workspace:*",
+    "@paperclipai/adapter-clickup-agent-ref": "workspace:*",
     "@paperclipai/adapter-openclaw-gateway": "workspace:*",
     "@paperclipai/adapter-otto-agent": "workspace:*",
     "@paperclipai/adapter-opencode-local": "workspace:*",

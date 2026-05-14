@@ -94,6 +94,11 @@ const adapterDisplayMap: Record<string, AdapterDisplayInfo> = {
     description: "Connect a managed OpenClaw gateway",
     icon: Bot,
   },
+  clickup_agent_ref: {
+    label: "ClickUp Agent Reference",
+    description: "Reference a ClickUp-side agent by syncing Bizbox work into ClickUp tasks",
+    icon: Bot,
+  },
   process: {
     label: "Process",
     description: "Internal process adapter",
