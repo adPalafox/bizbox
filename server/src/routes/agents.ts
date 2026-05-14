@@ -3033,7 +3033,7 @@ export function agentRoutes(db: Db) {
     assertCompanyAccess(req, companyId);
 
     const [bridge] = await db
-      .select({ id: clickupBridges.id })
+      .select({ id: clickupBridges.id, status: clickupBridges.status })
       .from(clickupBridges)
       .where(and(eq(clickupBridges.id, bridgeId), eq(clickupBridges.companyId, companyId)))
       .limit(1);
@@ -3045,7 +3045,9 @@ export function agentRoutes(db: Db) {
 
     const retried = await clickupBridgeService(db).retryBridge(bridgeId);
     if (!retried) {
-      res.status(409).json({ error: "ClickUp bridge is not failed or closed" });
+      res.status(409).json({
+        error: `ClickUp bridge can only be retried from failed state (current: ${bridge.status})`,
+      });
       return;
     }
 

@@ -764,13 +764,32 @@ export async function startServer(): Promise<StartedServer> {
         });
     }, config.heartbeatSchedulerIntervalMs);
 
+    let clickupOutboundRunning = false;
+    let clickupInboundRunning = false;
     setInterval(() => {
-      void heartbeat.processClickupOutbound().catch((err) => {
-        logger.error({ err }, "clickup outbound worker failed");
-      });
-      void heartbeat.pollClickupInbound().catch((err) => {
-        logger.error({ err }, "clickup inbound poller failed");
-      });
+      if (!clickupOutboundRunning) {
+        clickupOutboundRunning = true;
+        void heartbeat
+          .processClickupOutbound()
+          .catch((err) => {
+            logger.error({ err }, "clickup outbound worker failed");
+          })
+          .finally(() => {
+            clickupOutboundRunning = false;
+          });
+      }
+
+      if (!clickupInboundRunning) {
+        clickupInboundRunning = true;
+        void heartbeat
+          .pollClickupInbound()
+          .catch((err) => {
+            logger.error({ err }, "clickup inbound poller failed");
+          })
+          .finally(() => {
+            clickupInboundRunning = false;
+          });
+      }
     }, 1_000);
   }
   
