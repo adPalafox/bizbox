@@ -14,8 +14,10 @@ CREATE TABLE "clickup_bridges" (
   "last_imported_comment_id" text,
   "last_polled_at" timestamp with time zone,
   "next_poll_at" timestamp with time zone,
+  "cycle_opened_at" timestamp with time zone,
   "last_outbound_at" timestamp with time zone,
   "consecutive_poll_failures" integer DEFAULT 0 NOT NULL,
+  "close_reason" text,
   "last_error" text,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL
@@ -42,6 +44,26 @@ CREATE TABLE "clickup_outbound_events" (
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "agent_thread_messages" ADD COLUMN "source" text DEFAULT 'native' NOT NULL;
+--> statement-breakpoint
+ALTER TABLE "agent_thread_messages" ADD COLUMN "clickup_bridge_id" uuid;
+--> statement-breakpoint
+ALTER TABLE "agent_thread_messages" ADD COLUMN "clickup_external_message_id" text;
+--> statement-breakpoint
+ALTER TABLE "agent_thread_messages" ADD COLUMN "clickup_external_author_id" text;
+--> statement-breakpoint
+ALTER TABLE "agent_thread_messages" ADD COLUMN "clickup_external_author_name" text;
+--> statement-breakpoint
+ALTER TABLE "issue_comments" ADD COLUMN "source" text DEFAULT 'native' NOT NULL;
+--> statement-breakpoint
+ALTER TABLE "issue_comments" ADD COLUMN "clickup_bridge_id" uuid;
+--> statement-breakpoint
+ALTER TABLE "issue_comments" ADD COLUMN "clickup_external_message_id" text;
+--> statement-breakpoint
+ALTER TABLE "issue_comments" ADD COLUMN "clickup_external_author_id" text;
+--> statement-breakpoint
+ALTER TABLE "issue_comments" ADD COLUMN "clickup_external_author_name" text;
+--> statement-breakpoint
 ALTER TABLE "clickup_outbound_events" ADD CONSTRAINT "clickup_outbound_events_bridge_id_clickup_bridges_id_fk" FOREIGN KEY ("bridge_id") REFERENCES "public"."clickup_bridges"("id") ON DELETE no action ON UPDATE no action;
 --> statement-breakpoint
 CREATE INDEX "clickup_outbound_events_status_idx" ON "clickup_outbound_events" USING btree ("status","next_attempt_at","updated_at");
@@ -55,3 +77,11 @@ CREATE INDEX "heartbeat_runs_clickup_bridge_id_idx"
 CREATE UNIQUE INDEX "clickup_outbound_events_create_task_active_uq"
   ON "clickup_outbound_events" USING btree ("bridge_id", "kind")
   WHERE ("kind" = 'create_task' and "status" in ('pending', 'processing'));
+--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_thread_messages_clickup_external_message_uq"
+  ON "agent_thread_messages" USING btree ("clickup_external_message_id")
+  WHERE "agent_thread_messages"."clickup_external_message_id" IS NOT NULL;
+--> statement-breakpoint
+CREATE UNIQUE INDEX "issue_comments_clickup_external_message_uq"
+  ON "issue_comments" USING btree ("clickup_external_message_id")
+  WHERE "issue_comments"."clickup_external_message_id" IS NOT NULL;

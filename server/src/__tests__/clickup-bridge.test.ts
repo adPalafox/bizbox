@@ -39,32 +39,32 @@ describe("isUserCommentForImport", () => {
 
   it("accepts non-bot text comments", () => {
     const res = isUserCommentForImport({ id: "c2", comment_text: "hello", user: { id: "u-1" }, date: "200" }, "bot-1");
-    expect(res).toEqual({ id: "c2", text: "hello", createdAt: 200 });
+    expect(res).toEqual({ id: "c2", text: "hello", createdAt: 200, authorId: "u-1", authorName: null });
   });
 
   it("accepts numeric ClickUp ids", () => {
     const res = isUserCommentForImport({ id: 42, comment_text: "hello", user: { id: 7 }, date: 200 }, "999");
-    expect(res).toEqual({ id: "42", text: "hello", createdAt: 200 });
+    expect(res).toEqual({ id: "42", text: "hello", createdAt: 200, authorId: "7", authorName: null });
   });
 
   it("does not filter agent replies when bridge bot id is absent", () => {
-    const res = isUserCommentForImport({ id: "c3", comment_text: "reply", user: { id: -16805283 }, date: "300" }, null, -16805283);
-    expect(res).toEqual({ id: "c3", text: "reply", createdAt: 300 });
+    const res = isUserCommentForImport({ id: "c3", comment_text: "reply", user: { id: -16805283 }, date: "300" }, null);
+    expect(res).toEqual({ id: "c3", text: "reply", createdAt: 300, authorId: "-16805283", authorName: null });
   });
 
-  it("filters non-agent comments when bridge bot id is absent", () => {
-    const res = isUserCommentForImport({ id: "c4", comment_text: "loopback", user: { id: 42 }, date: "400" }, null, -16805283);
+  it("accepts non-bot comments when bridge bot id is absent", () => {
+    const res = isUserCommentForImport({ id: "c4", comment_text: "human reply", user: { id: 42 }, date: "400" }, null);
+    expect(res).toEqual({ id: "c4", text: "human reply", createdAt: 400, authorId: "42", authorName: null });
+  });
+
+  it("filters bridge bot comments when bot id is configured", () => {
+    const res = isUserCommentForImport({ id: "c5", comment_text: "loopback", user: { id: "bot-1" }, date: "500" }, "bot-1");
     expect(res).toBeNull();
   });
 
-  it("filters non-agent comments when bot id and agent id are both configured", () => {
-    const res = isUserCommentForImport({ id: "c5", comment_text: "human reply", user: { id: 42 }, date: "500" }, "bot-1", -16805283);
-    expect(res).toBeNull();
-  });
-
-  it("accepts configured agent comments when bot id and agent id are both configured", () => {
-    const res = isUserCommentForImport({ id: "c6", comment_text: "agent reply", user: { id: -16805283 }, date: "600" }, "bot-1", -16805283);
-    expect(res).toEqual({ id: "c6", text: "agent reply", createdAt: 600 });
+  it("accepts non-bot comments even when a separate agent user id exists in config", () => {
+    const res = isUserCommentForImport({ id: "c6", comment_text: "agent reply", user: { id: -16805283 }, date: "600" }, "bot-1");
+    expect(res).toEqual({ id: "c6", text: "agent reply", createdAt: 600, authorId: "-16805283", authorName: null });
   });
 
   it("falls back to rich comment array when comment_text missing", () => {
@@ -77,8 +77,14 @@ describe("isUserCommentForImport", () => {
       ],
       user: { id: -16805283 },
       date: "700",
-    }, "bot-1", -16805283);
-    expect(res).toEqual({ id: "c7", text: "reviewed @Risk and approved", createdAt: 700 });
+    }, "bot-1");
+    expect(res).toEqual({
+      id: "c7",
+      text: "reviewed @Risk and approved",
+      createdAt: 700,
+      authorId: "-16805283",
+      authorName: null,
+    });
   });
 });
 
@@ -201,15 +207,22 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     await clickupBridgeService(db).pollInbound();
 
     const comments = await db.select().from(issueComments);
+    const [bridge] = await db.select().from(clickupBridges);
     expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toBe("Imported from ClickUp");
+    expect(comments[0]).toEqual(expect.objectContaining({
+      source: "clickup_bridge",
+      clickupBridgeId: bridge?.id,
+      clickupExternalMessageId: "clickup-comment-1",
+      clickupExternalAuthorId: "101",
+    }));
 
-    const [bridge] = await db.select().from(clickupBridges);
     expect(bridge).toEqual(expect.objectContaining({
-      status: "agent_replied",
+      status: "closed",
+      closeReason: "Imported ClickUp reply",
       lastImportedCommentId: "clickup-comment-1",
     }));
-    expect(bridge?.nextPollAt).toBeInstanceOf(Date);
+    expect(bridge?.nextPollAt).toBeNull();
 
     const events = await db.select().from(activityLog);
     expect(events).toHaveLength(1);
@@ -415,7 +428,67 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(comments[0]?.body).toBe("AI agent reply");
   });
 
-  it("deduplicates overlapping top-level comments and reply payload rows within one poll", async () => {
+  it("closes archived agent-thread bridges instead of polling them forever", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const threadId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "ClickUp Bridge",
+      role: "engineer",
+      status: "running",
+      adapterType: "clickup_agent_ref",
+      adapterConfig: {
+        listId: "list-1",
+        authToken: "token-1",
+        bridgeBotUserId: "bridge-bot-1",
+      },
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(agentThreads).values({
+      id: threadId,
+      companyId,
+      agentId,
+      status: "archived",
+      archivedAt: new Date("2026-05-12T08:00:00.000Z"),
+      lastActivityAt: new Date("2026-05-12T08:00:00.000Z"),
+    });
+
+    const [bridge] = await db.insert(clickupBridges).values({
+      companyId,
+      agentId,
+      sourceType: "agent_thread",
+      sourceId: threadId,
+      taskKey: `agent-thread:${threadId}`,
+      clickupListId: "list-1",
+      clickupTaskId: "task-1",
+      status: "waiting_for_agent_reply",
+      nextPollAt: new Date(Date.now() - 60_000),
+    }).returning();
+
+    await clickupBridgeService(db).pollInbound();
+
+    const refreshedBridge = await db.select().from(clickupBridges).then((rows) => rows.find((row) => row.id === bridge!.id) ?? null);
+    expect(refreshedBridge).toEqual(expect.objectContaining({
+      status: "closed",
+      nextPollAt: null,
+      closeReason: "Agent thread archived before ClickUp reply import",
+      lastError: null,
+    }));
+  });
+
+  it("deduplicates overlapping top-level comments and reply payload rows within one poll and closes after the first import", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith("/task/task-1/comment")) {
@@ -534,11 +607,11 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     await clickupBridgeService(db).pollInbound();
 
     const comments = await db.select().from(issueComments);
-    expect(comments.map((comment) => comment.body)).toEqual(["hello", "Bizbox Agent Reply"]);
+    expect(comments.map((comment) => comment.body)).toEqual(["hello"]);
 
     const events = await db.select().from(activityLog);
-    expect(events).toHaveLength(2);
-    expect(events.map((event) => event.details?.clickupCommentId)).toEqual(["clickup-comment-1", "clickup-comment-2"]);
+    expect(events).toHaveLength(1);
+    expect(events.map((event) => event.details?.clickupCommentId)).toEqual(["clickup-comment-1"]);
   });
 
   it("skips malformed task comment payloads without failing the bridge poll", async () => {
@@ -703,13 +776,14 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(comments).toHaveLength(1);
     expect(comments[0]?.body).toBe("Imported from ClickUp");
     expect(bridge).toEqual(expect.objectContaining({
-      status: "agent_replied",
+      status: "closed",
+      closeReason: "Imported ClickUp reply",
       consecutivePollFailures: 0,
       lastError: null,
     }));
   });
 
-  it("keeps polling after the first imported reply so later ClickUp replies are also imported", async () => {
+  it("closes after the first imported reply so later ClickUp replies are ignored until a new outbound cycle opens", async () => {
     const replies = [
       [
         {
@@ -815,15 +889,15 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     await svc.pollInbound();
 
     const comments = await db.select().from(issueComments);
-    expect(comments).toHaveLength(2);
-    expect(comments.map((comment) => comment.body)).toEqual(["First reply", "Second reply"]);
+    expect(comments).toHaveLength(1);
+    expect(comments.map((comment) => comment.body)).toEqual(["First reply"]);
 
     const [bridge] = await db.select().from(clickupBridges);
     expect(bridge).toEqual(expect.objectContaining({
-      status: "agent_replied",
-      lastImportedCommentId: "clickup-comment-2",
+      status: "closed",
+      closeReason: "Imported ClickUp reply",
+      lastImportedCommentId: "clickup-comment-1",
     }));
-    expect(bridge?.nextPollAt).toBeInstanceOf(Date);
   });
 
   it("imports ClickUp replies into active agent threads", async () => {
@@ -1071,12 +1145,14 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(targetBridge).toEqual(expect.objectContaining({
       status: "closed",
       nextPollAt: null,
-      lastError: "shutdown",
+      closeReason: "shutdown",
+      lastError: null,
     }));
     expect(pendingTargetBridge).toEqual(expect.objectContaining({
       status: "closed",
       nextPollAt: null,
-      lastError: "shutdown",
+      closeReason: "shutdown",
+      lastError: null,
     }));
     expect(untouchedBridge).toEqual(expect.objectContaining({
       status: "waiting_for_agent_reply",
@@ -1595,7 +1671,7 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
     expect(bridge).toEqual(expect.objectContaining({
       clickupTaskId: "task-1",
       clickupTaskUrl: "https://app.clickup.com/t/task-1",
-      status: "waiting_for_agent_reply",
+      status: "pending_clickup_task",
       lastError: "clickup first comment failed: 503",
     }));
     expect(requests.map((request) => request.url)).toEqual([
@@ -2037,7 +2113,7 @@ describeEmbeddedPostgres("clickupBridgeService.pollInbound", () => {
       taskKey: "issue:automation",
       clickupListId: "list-1",
       clickupTaskId: "task-1",
-      status: "agent_replied",
+      status: "waiting_for_agent_reply",
       mode: "automation_trigger",
       importedCommentIds: [],
     }).returning();

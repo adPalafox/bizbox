@@ -29,6 +29,7 @@ describe("buildClickUpAgentRefConfig", () => {
       adapterSchemaValues: {
         workspaceId: "team_1",
         listId: "list_1",
+        bridgeBotUserId: "654321",
         clickupAgentUserId: "123456",
         triggerMode: "automation_trigger",
         automationStatus: "ai_intake",
@@ -40,6 +41,7 @@ describe("buildClickUpAgentRefConfig", () => {
       authToken: "token",
       workspaceId: "team_1",
       listId: "list_1",
+      bridgeBotUserId: "654321",
       clickupAgentUserId: "123456",
       triggerMode: "automation_trigger",
       automationStatus: "ai_intake",

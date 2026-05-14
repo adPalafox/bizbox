@@ -20,6 +20,9 @@ export function buildClickUpAgentRefConfig(v: CreateConfigValues): Record<string
   if (typeof adapterSchemaValues.channelId === "string" && adapterSchemaValues.channelId.trim()) {
     config.channelId = adapterSchemaValues.channelId.trim();
   }
+  if (typeof adapterSchemaValues.bridgeBotUserId === "string" && adapterSchemaValues.bridgeBotUserId.trim()) {
+    config.bridgeBotUserId = adapterSchemaValues.bridgeBotUserId.trim();
+  }
   if (
     (typeof adapterSchemaValues.clickupAgentUserId === "number" && Number.isFinite(adapterSchemaValues.clickupAgentUserId)) ||
     (typeof adapterSchemaValues.clickupAgentUserId === "string" && adapterSchemaValues.clickupAgentUserId.trim())

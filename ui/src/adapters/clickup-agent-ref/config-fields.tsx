@@ -94,13 +94,23 @@ export function ClickUpAgentRefConfigFields(props: AdapterConfigFieldsProps) {
         />
       </Field>
 
-      <Field label="Bridge bot user ID (ClickUp user ID)">
+      <Field label="Bridge bot user ID">
+        <DraftInput
+          value={readSchemaValue(props, "bridgeBotUserId")}
+          onCommit={(value) => writeSchemaValue(props, "bridgeBotUserId", value)}
+          immediate
+          className={inputClass}
+          placeholder="123456"
+        />
+      </Field>
+
+      <Field label="ClickUp assignee / mention user ID">
         <DraftInput
           value={readSchemaValue(props, "clickupAgentUserId")}
           onCommit={(value) => writeSchemaValue(props, "clickupAgentUserId", value)}
           immediate
           className={inputClass}
-          placeholder="123456"
+          placeholder="Optional outbound assignee or @mention user"
         />
       </Field>
 

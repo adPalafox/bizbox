@@ -19,6 +19,11 @@ export interface AgentThreadMessage {
   authorUserId: string | null;
   authorAgentId: string | null;
   producingHeartbeatRunId: string | null;
+  source?: "native" | "clickup_bridge";
+  clickupBridgeId?: string | null;
+  clickupExternalMessageId?: string | null;
+  clickupExternalAuthorId?: string | null;
+  clickupExternalAuthorName?: string | null;
   body: string;
   createdAt: Date;
   updatedAt: Date;

@@ -14,7 +14,6 @@ Use when:
 
 Don't use when:
 - You expect Bizbox to directly invoke a public ClickUp AI agent execution API. ClickUp does not expose a stable public runtime API for that flow.
-- You want direct LLM execution through OpenAI. Use openai_agent instead.
 
 Core fields:
 - authToken (string, required at runtime): ClickUp OAuth or personal access token. You can also persist authTokenRef as a Bizbox secret reference.
@@ -22,7 +21,8 @@ Core fields:
 - listId (string, required): ClickUp list id where Bizbox issues should be materialized as tasks.
 
 Optional fields:
-- clickupAgentUserId (number, optional): ClickUp user id to assign on task creation and @mention in task comments
+- bridgeBotUserId (number|string, optional): ClickUp user id Bizbox uses when posting bridge comments. Bizbox suppresses loopback imports from this author id.
+- clickupAgentUserId (number, optional): ClickUp user id to assign on task creation and @mention in task comments. This is outbound-only metadata, not an inbound reply allowlist.
 - triggerMode (string, optional): api_comment_only (default) or automation_trigger.
 - automationStatus (string, optional): task status to set so a ClickUp Automation can trigger the Super Agent.
 - automationTags (array|string, optional): tags to set on the task so a ClickUp Automation can trigger the Super Agent.
@@ -33,7 +33,9 @@ Optional fields:
 Execution behavior:
 - First run for a task creates a ClickUp task in the configured list.
 - Later runs reuse the stored ClickUp task id from sessionParams and append a task comment.
+- Bizbox imports non-bot ClickUp replies by default. bridgeBotUserId only suppresses Bizbox's own loopback comments.
 - If triggerMode=automation_trigger, the adapter stays API-only and optionally applies automationStatus and automationTags so native ClickUp Automations can trigger the Super Agent.
+- Archived agent-thread bridges are closed automatically so stale pollers do not keep showing as live work.
 - The adapter returns a summary and stored sessionParams so Bizbox continues referencing the same ClickUp task.
 
 Security notes:

@@ -113,6 +113,17 @@ pnpm test:release-smoke
 
 These browser suites are intended for targeted local verification and CI, not the default agent/human test command.
 
+## ClickUp Bridge Notes
+
+For `clickup_agent_ref`:
+
+- `bridgeBotUserId` is the ClickUp author id Bizbox uses when posting bridge comments. It is only for loopback suppression.
+- `clickupAgentUserId` is outbound-only metadata for assignee / `@mention` targeting. It must not be treated as an inbound reply allowlist.
+- Bizbox imports non-bot ClickUp replies by default.
+- Archived `agent_thread` bridges are closed automatically so stale pollers do not remain visible as live work.
+
+A review-driven regression briefly treated `clickupAgentUserId` as a hard inbound author gate and caused stuck live ClickUp polls. Keep the fields separate.
+
 ## One-Command Local Run
 
 For a first-time local install, you can bootstrap and run in one command:

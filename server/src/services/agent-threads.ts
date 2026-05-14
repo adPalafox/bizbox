@@ -136,6 +136,13 @@ export function agentThreadService(db: Db) {
       authorAgentId: string;
       body: string;
       producingHeartbeatRunId?: string | null;
+      provenance?: {
+        source: "native" | "clickup_bridge";
+        clickupBridgeId?: string | null;
+        clickupExternalMessageId?: string | null;
+        clickupExternalAuthorId?: string | null;
+        clickupExternalAuthorName?: string | null;
+      };
       now?: Date;
     }) => {
       const now = input.now ?? new Date();
@@ -166,6 +173,11 @@ export function agentThreadService(db: Db) {
             authorUserId: null,
             authorAgentId: input.authorAgentId,
             producingHeartbeatRunId: input.producingHeartbeatRunId ?? null,
+            source: input.provenance?.source ?? "native",
+            clickupBridgeId: input.provenance?.clickupBridgeId ?? null,
+            clickupExternalMessageId: input.provenance?.clickupExternalMessageId ?? null,
+            clickupExternalAuthorId: input.provenance?.clickupExternalAuthorId ?? null,
+            clickupExternalAuthorName: input.provenance?.clickupExternalAuthorName ?? null,
             body: input.body,
             createdAt: now,
             updatedAt: now,
@@ -174,6 +186,14 @@ export function agentThreadService(db: Db) {
           .returning();
 
         if (!message) {
+          if (input.provenance?.clickupExternalMessageId) {
+            const [existingImportedMessage] = await tx
+              .select()
+              .from(agentThreadMessages)
+              .where(eq(agentThreadMessages.clickupExternalMessageId, input.provenance.clickupExternalMessageId))
+              .limit(1);
+            if (existingImportedMessage) return existingImportedMessage;
+          }
           // Duplicate producing run — skip silently
           return null;
         }

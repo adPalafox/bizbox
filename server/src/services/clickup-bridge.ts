@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
-import { agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
+import { agentThreads, agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
 import { parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { issueService } from "./issues.js";
 import { agentThreadService } from "./agent-threads.js";
@@ -15,6 +15,7 @@ const MAX_POLL_FAILURES = 10;
 const MAX_IMPORTED_IDS = 1000;
 const MIN_POLL_CLAIM_MS = 45_000;
 const STALE_OUTBOUND_PROCESSING_MS = 2 * 60 * 1000;
+const BRIDGE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -116,6 +117,11 @@ function nextPollAt(now = Date.now(), lastOutboundAt?: Date | null, lastImported
   if (ageMs <= 10 * 60_000) return new Date(now + 5_000);
   if (ageMs <= 60 * 60_000) return new Date(now + 15_000);
   return new Date(now + 60_000);
+}
+
+function cycleTimedOut(lastOutboundAt: Date | null | undefined, now = Date.now()): boolean {
+  if (!lastOutboundAt) return false;
+  return now - lastOutboundAt.getTime() >= BRIDGE_IDLE_TIMEOUT_MS;
 }
 
 function buildBridgeCommentPayload(
@@ -238,20 +244,35 @@ function renderCommentRichText(raw: unknown): string {
     .trim();
 }
 
-export function isUserCommentForImport(raw: unknown, bridgeBotUserId: string | null, clickupAgentUserId: number | null = null): { id: string; text: string; createdAt: number } | null {
+export function isUserCommentForImport(
+  raw: unknown,
+  bridgeBotUserId: string | null,
+): {
+  id: string;
+  text: string;
+  createdAt: number;
+  authorId: string;
+  authorName: string | null;
+} | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
   const id = asScalarString(row.id);
   const text = asString(row.comment_text) || renderCommentRichText(row.comment);
   const author = row.user && typeof row.user === "object" ? (row.user as Record<string, unknown>) : null;
   const authorId = author ? asScalarString(author.id) : "";
+  const authorName = author ? (asString(author.username) || asString(author.name) || null) : null;
   const isSystem = typeof row.comment === "object" && row.comment !== null && !Array.isArray(row.comment);
   const createdAt = Number(asScalarString(row.date) || 0);
   if (!id || !text || !authorId) return null;
   if (bridgeBotUserId && authorId === bridgeBotUserId) return null;
-  if (clickupAgentUserId != null && authorId !== String(clickupAgentUserId)) return null;
   if (isSystem) return null;
-  return { id, text, createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now() };
+  return {
+    id,
+    text,
+    createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now(),
+    authorId,
+    authorName,
+  };
 }
 
 async function clickupRequest(url: string, init: RequestInit, timeoutSec: number): Promise<{ ok: boolean; status: number; text: string }> {
@@ -269,12 +290,26 @@ export function clickupBridgeService(db: Db) {
   const issuesSvc = issueService(db);
   const agentThreadsSvc = agentThreadService(db);
 
+  async function closeBridge(bridgeId: string, reason: string) {
+    await db.update(clickupBridges).set({
+      status: "closed",
+      nextPollAt: null,
+      closeReason: reason,
+      lastError: null,
+      updatedAt: new Date(),
+    }).where(
+      and(
+        eq(clickupBridges.id, bridgeId),
+        inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
+      ),
+    );
+  }
+
   return {
     async closeActiveBridges(reason: string, companyId?: string) {
       const filters = [
         or(
           eq(clickupBridges.status, "waiting_for_agent_reply"),
-          eq(clickupBridges.status, "agent_replied"),
           eq(clickupBridges.status, "pending_clickup_task"),
         ),
         ...(companyId ? [eq(clickupBridges.companyId, companyId)] : []),
@@ -284,7 +319,8 @@ export function clickupBridgeService(db: Db) {
         .set({
           status: "closed",
           nextPollAt: null,
-          lastError: reason,
+          closeReason: reason,
+          lastError: null,
           updatedAt: new Date(),
         })
         .where(and(...filters))
@@ -335,8 +371,14 @@ export function clickupBridgeService(db: Db) {
         const [reopened] = await db
           .update(clickupBridges)
           .set({
-            status: bridge.clickupTaskId ? "waiting_for_agent_reply" : "pending_clickup_task",
-            nextPollAt: now,
+            status: "pending_clickup_task",
+            nextPollAt: null,
+            cycleOpenedAt: null,
+            lastPolledAt: null,
+            lastImportedCommentId: null,
+            lastOutboundAt: null,
+            consecutivePollFailures: 0,
+            closeReason: null,
             lastError: null,
             updatedAt: now,
           })
@@ -475,9 +517,10 @@ export function clickupBridgeService(db: Db) {
             const [updatedBridgeAfterCreate] = await db.update(clickupBridges).set({
               clickupTaskId: taskId,
               clickupTaskUrl: createdTask.taskUrl,
-              status: "waiting_for_agent_reply",
-              nextPollAt: new Date(Date.now() + 2_000),
+              status: "pending_clickup_task",
+              nextPollAt: null,
               lastError: null,
+              closeReason: null,
               updatedAt: new Date(),
             }).where(
               and(
@@ -490,7 +533,7 @@ export function clickupBridgeService(db: Db) {
                 ...bridge,
                 clickupTaskId: taskId,
                 clickupTaskUrl: createdTask.taskUrl,
-                status: "waiting_for_agent_reply",
+                status: "pending_clickup_task",
               };
             }
 
@@ -501,20 +544,23 @@ export function clickupBridgeService(db: Db) {
             );
             if (!firstComment.ok) throw new Error(`clickup first comment failed: ${firstComment.status}`);
             const firstCommentId = extractCommentIdFromCreateResponse(firstComment.text);
+            const outboundAt = new Date();
 
             await db.update(clickupBridges).set({
               clickupTaskId: taskId,
               clickupTaskUrl: createdTask.taskUrl,
               status: "waiting_for_agent_reply",
               importedCommentIds: firstCommentId ? appendImportedId(bridge.importedCommentIds, firstCommentId) : bridge.importedCommentIds,
-              lastOutboundAt: new Date(),
-              nextPollAt: new Date(Date.now() + 2_000),
+              cycleOpenedAt: bridge.cycleOpenedAt ?? outboundAt,
+              lastOutboundAt: outboundAt,
+              nextPollAt: new Date(outboundAt.getTime() + 2_000),
+              closeReason: null,
               lastError: null,
-              updatedAt: new Date(),
+              updatedAt: outboundAt,
             }).where(
               and(
                 eq(clickupBridges.id, bridge.id),
-                inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+                inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
               ),
             );
           } else {
@@ -546,17 +592,20 @@ export function clickupBridgeService(db: Db) {
               );
               if (!post.ok) throw new Error(`clickup append comment failed: ${post.status}`);
               const postedCommentId = extractCommentIdFromCreateResponse(post.text);
+              const outboundAt = new Date();
               await db.update(clickupBridges).set({
                 status: "waiting_for_agent_reply",
                 importedCommentIds: postedCommentId ? appendImportedId(bridge.importedCommentIds, postedCommentId) : bridge.importedCommentIds,
-                lastOutboundAt: new Date(),
-                nextPollAt: new Date(Date.now() + 2_000),
+                cycleOpenedAt: bridge.cycleOpenedAt ?? outboundAt,
+                lastOutboundAt: outboundAt,
+                nextPollAt: new Date(outboundAt.getTime() + 2_000),
+                closeReason: null,
                 lastError: null,
-                updatedAt: new Date(),
+                updatedAt: outboundAt,
               }).where(
                 and(
                   eq(clickupBridges.id, bridge.id),
-                  inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+                  inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
                 ),
               );
               if (bridge.mode === "automation_trigger" && cfg.statusToTriggerAgent) {
@@ -608,7 +657,7 @@ export function clickupBridgeService(db: Db) {
             }).where(
               and(
                 eq(clickupBridges.id, bridge.id),
-                inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+                inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
               ),
             );
           }
@@ -623,7 +672,7 @@ export function clickupBridgeService(db: Db) {
         .from(clickupBridges)
         .where(
           and(
-            inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
+            eq(clickupBridges.status, "waiting_for_agent_reply"),
             or(isNull(clickupBridges.nextPollAt), lte(clickupBridges.nextPollAt, now)),
           ),
         )
@@ -640,7 +689,7 @@ export function clickupBridgeService(db: Db) {
           .where(
             and(
               eq(clickupBridges.id, bridge.id),
-              inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
+              eq(clickupBridges.status, "waiting_for_agent_reply"),
               or(isNull(clickupBridges.nextPollAt), lte(clickupBridges.nextPollAt, now)),
             ),
           )
@@ -648,6 +697,28 @@ export function clickupBridgeService(db: Db) {
         if (!claimedBridge) continue;
 
         try {
+          if (cycleTimedOut(bridge.lastOutboundAt)) {
+            await closeBridge(bridge.id, "Timed out waiting for ClickUp reply");
+            continue;
+          }
+
+          if (bridge.sourceType === "agent_thread") {
+            const [thread] = await db
+              .select({ status: agentThreads.status })
+              .from(agentThreads)
+              .where(
+                and(
+                  eq(agentThreads.companyId, bridge.companyId),
+                  eq(agentThreads.id, bridge.sourceId),
+                ),
+              )
+              .limit(1);
+            if (!thread || thread.status !== "active") {
+              await closeBridge(bridge.id, "Agent thread archived before ClickUp reply import");
+              continue;
+            }
+          }
+
           const agent = await db.select().from(agents).where(eq(agents.id, bridge.agentId)).then((rows) => rows[0] ?? null);
           const cfg = resolveConfig(parseObject(agent?.adapterConfig));
           const claimMs = computePollClaimMs(cfg.timeoutSec);
@@ -692,11 +763,16 @@ export function clickupBridgeService(db: Db) {
             }
           }
 
-          const candidatesById = new Map<string, { id: string; text: string; createdAt: number }>();
+          const cycleOpenedAtMs = bridge.cycleOpenedAt?.getTime() ?? bridge.lastOutboundAt?.getTime() ?? 0;
+          const candidatesById = new Map<
+            string,
+            { id: string; text: string; createdAt: number; authorId: string; authorName: string | null }
+          >();
           for (const item of [...comments, ...replyRows]
-            .map((c) => isUserCommentForImport(c, cfg.bridgeBotUserId, cfg.clickupAgentUserId))
-            .filter((c): c is { id: string; text: string; createdAt: number } => c !== null)
-            .filter((c) => !imported.has(c.id))) {
+            .map((c) => isUserCommentForImport(c, cfg.bridgeBotUserId))
+            .filter((c): c is { id: string; text: string; createdAt: number; authorId: string; authorName: string | null } => c !== null)
+            .filter((c) => !imported.has(c.id))
+            .filter((c) => c.createdAt >= cycleOpenedAtMs)) {
             const existing = candidatesById.get(item.id);
             if (!existing || item.createdAt < existing.createdAt) {
               candidatesById.set(item.id, item);
@@ -705,69 +781,96 @@ export function clickupBridgeService(db: Db) {
           const candidates = [...candidatesById.values()]
             .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 
-          for (const item of candidates) {
+          const firstCandidate = candidates[0] ?? null;
+          if (!firstCandidate) {
             await db.update(clickupBridges).set({
-              nextPollAt: new Date(Date.now() + claimMs),
+              lastPolledAt: new Date(),
+              nextPollAt: nextPollAt(Date.now(), bridge.lastOutboundAt, bridge.lastPolledAt),
+              consecutivePollFailures: 0,
+              lastError: null,
               updatedAt: new Date(),
-            }).where(eq(clickupBridges.id, bridge.id));
-            if (bridge.sourceType === "issue") {
-              const comment = await issuesSvc.addComment(bridge.sourceId, item.text, { agentId: bridge.agentId });
-              imported.add(item.id);
-              await db.update(clickupBridges).set({
-                importedCommentIds: Array.from(imported).slice(-MAX_IMPORTED_IDS),
-                lastImportedCommentId: item.id,
-                updatedAt: new Date(),
-              }).where(eq(clickupBridges.id, bridge.id));
-              const issue = await issuesSvc.getById(bridge.sourceId);
-              if (issue) {
-                await logActivity(db, {
-                  companyId: bridge.companyId,
-                  actorType: "agent",
-                  actorId: bridge.agentId,
-                  agentId: bridge.agentId,
-                  action: "issue.comment_added",
-                  entityType: "issue",
-                  entityId: bridge.sourceId,
-                  details: {
-                    commentId: comment.id,
-                    bodySnippet: comment.body.slice(0, 120),
-                    identifier: issue.identifier,
-                    issueTitle: issue.title,
-                    source: "clickup_bridge",
-                    clickupCommentId: item.id,
-                    clickupTaskId: bridge.clickupTaskId,
-                  },
-                });
-              }
-            } else {
-              await agentThreadsSvc.postAssistantMessage({
+            }).where(
+              and(
+                eq(clickupBridges.id, bridge.id),
+                eq(clickupBridges.status, "waiting_for_agent_reply"),
+              ),
+            );
+            continue;
+          }
+
+          await db.update(clickupBridges).set({
+            nextPollAt: new Date(Date.now() + claimMs),
+            updatedAt: new Date(),
+          }).where(eq(clickupBridges.id, bridge.id));
+
+          if (bridge.sourceType === "issue") {
+            const comment = await issuesSvc.addComment(bridge.sourceId, firstCandidate.text, {
+              agentId: bridge.agentId,
+              provenance: {
+                source: "clickup_bridge",
+                clickupBridgeId: bridge.id,
+                clickupExternalMessageId: firstCandidate.id,
+                clickupExternalAuthorId: firstCandidate.authorId,
+                clickupExternalAuthorName: firstCandidate.authorName,
+              },
+            });
+            imported.add(firstCandidate.id);
+            const issue = await issuesSvc.getById(bridge.sourceId);
+            if (issue) {
+              await logActivity(db, {
                 companyId: bridge.companyId,
-                threadId: bridge.sourceId,
-                authorAgentId: bridge.agentId,
-                body: item.text,
+                actorType: "agent",
+                actorId: bridge.agentId,
+                agentId: bridge.agentId,
+                action: "issue.comment_added",
+                entityType: "issue",
+                entityId: bridge.sourceId,
+                details: {
+                  commentId: comment.id,
+                  bodySnippet: comment.body.slice(0, 120),
+                  identifier: issue.identifier,
+                  issueTitle: issue.title,
+                  source: "clickup_bridge",
+                  clickupCommentId: firstCandidate.id,
+                  clickupTaskId: bridge.clickupTaskId,
+                },
               });
-              imported.add(item.id);
-              await db.update(clickupBridges).set({
-                importedCommentIds: Array.from(imported).slice(-MAX_IMPORTED_IDS),
-                lastImportedCommentId: item.id,
-                updatedAt: new Date(),
-              }).where(eq(clickupBridges.id, bridge.id));
             }
+          } else {
+            const message = await agentThreadsSvc.postAssistantMessage({
+              companyId: bridge.companyId,
+              threadId: bridge.sourceId,
+              authorAgentId: bridge.agentId,
+              body: firstCandidate.text,
+              provenance: {
+                source: "clickup_bridge",
+                clickupBridgeId: bridge.id,
+                clickupExternalMessageId: firstCandidate.id,
+                clickupExternalAuthorId: firstCandidate.authorId,
+                clickupExternalAuthorName: firstCandidate.authorName,
+              },
+            });
+            if (!message) {
+              await closeBridge(bridge.id, "Agent thread archived before ClickUp reply import");
+              continue;
+            }
+            imported.add(firstCandidate.id);
           }
 
           await db.update(clickupBridges).set({
             importedCommentIds: Array.from(imported).slice(-MAX_IMPORTED_IDS),
-            lastImportedCommentId: candidates[candidates.length - 1]?.id ?? bridge.lastImportedCommentId,
+            lastImportedCommentId: firstCandidate.id,
             lastPolledAt: new Date(),
-            nextPollAt: nextPollAt(Date.now(), bridge.lastOutboundAt, bridge.lastPolledAt),
             consecutivePollFailures: 0,
-            status: candidates.length > 0 ? "agent_replied" : "waiting_for_agent_reply",
+            status: "closed",
+            nextPollAt: null,
+            closeReason: "Imported ClickUp reply",
             lastError: null,
             updatedAt: new Date(),
           }).where(
             and(
               eq(clickupBridges.id, bridge.id),
-              inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
+              eq(clickupBridges.status, "waiting_for_agent_reply"),
             ),
           );
         } catch (err) {
@@ -782,7 +885,7 @@ export function clickupBridgeService(db: Db) {
           }).where(
             and(
               eq(clickupBridges.id, bridge.id),
-              inArray(clickupBridges.status, ["waiting_for_agent_reply", "agent_replied"]),
+              eq(clickupBridges.status, "waiting_for_agent_reply"),
             ),
           );
         }
@@ -792,22 +895,26 @@ export function clickupBridgeService(db: Db) {
     async retryBridge(bridgeId: string) {
       const [bridge] = await db.select().from(clickupBridges).where(eq(clickupBridges.id, bridgeId));
       if (!bridge) return null;
-      if (bridge.status !== "failed" && bridge.status !== "closed") return null;
+      if (bridge.status !== "failed") return null;
 
-      const status = bridge.clickupTaskId ? "waiting_for_agent_reply" : "pending_clickup_task";
       const [updated] = await db
         .update(clickupBridges)
         .set({
-          status,
+          status: "pending_clickup_task",
+          cycleOpenedAt: null,
+          lastImportedCommentId: null,
+          lastPolledAt: null,
+          lastOutboundAt: null,
+          closeReason: null,
           lastError: null,
           consecutivePollFailures: 0,
-          nextPollAt: new Date(),
+          nextPollAt: null,
           updatedAt: new Date(),
         })
         .where(
           and(
             eq(clickupBridges.id, bridgeId),
-            or(eq(clickupBridges.status, "failed"), eq(clickupBridges.status, "closed")),
+            eq(clickupBridges.status, "failed"),
           ),
         )
         .returning({ id: clickupBridges.id, status: clickupBridges.status });
