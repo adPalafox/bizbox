@@ -17,7 +17,7 @@ export const clickupBridges = pgTable(
     mode: text("mode").notNull().$type<"api_comment_only" | "automation_trigger">().default("api_comment_only"),
     status: text("status")
       .notNull()
-      .$type<"pending_clickup_task" | "waiting_for_agent_reply" | "agent_replied" | "failed" | "closed">()
+      .$type<"pending_clickup_task" | "waiting_for_agent_reply" | "failed" | "closed">()
       .default("pending_clickup_task"),
     importedCommentIds: jsonb("imported_comment_ids").$type<string[]>().notNull().default([]),
     lastImportedCommentId: text("last_imported_comment_id"),

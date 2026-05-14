@@ -52,6 +52,12 @@ function normalizeBaseUrl(raw: string): string {
   return parsed.toString().replace(/\/$/, "");
 }
 
+function asScalarString(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
 function resolveConfig(ctx: AdapterExecutionContext): ClickUpAgentRefConfig {
   const raw = parseObject(ctx.config);
   const authToken = asString(raw.authToken, "").trim();
@@ -323,7 +329,7 @@ function toImportedComment(
 ): ClickUpCommentEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
-  const id = typeof record.id === "string" ? record.id.trim() : "";
+  const id = asScalarString(record.id);
   const body = normalizeCommentText(record.comment_text) ?? renderCommentRichText(record.comment);
   const createdAt = normalizeCommentDate(record.date);
   if (!id || !body || createdAt == null) return null;
@@ -405,7 +411,7 @@ async function fetchNewAgentComments(
     }
 
     const record = rawComment && typeof rawComment === "object" ? (rawComment as Record<string, unknown>) : null;
-    const commentId = typeof record?.id === "string" ? record.id : null;
+    const commentId = asScalarString(record?.id) || null;
     const replyCount =
       typeof record?.reply_count === "number" && Number.isFinite(record.reply_count)
         ? record.reply_count
