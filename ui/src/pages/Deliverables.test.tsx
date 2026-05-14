@@ -250,6 +250,8 @@ describe("Deliverables page", () => {
     expect(pendingInput).toBeTruthy();
     expect(pendingInput?.isConnected).toBe(true);
     expect((pendingInput as HTMLInputElement).value).toBe("r");
+    expect(container.querySelector("svg.animate-spin")).toBeTruthy();
+    expect(container.querySelector(".opacity-70")).toBeTruthy();
 
     await act(async () => {
       resolveSearch?.({
@@ -263,6 +265,7 @@ describe("Deliverables page", () => {
     await flushReact();
 
     expect(container.textContent).toContain("Recycled draft");
+    expect(container.querySelector("svg.animate-spin")).toBeNull();
   });
 
   it("keeps the audience filter visible when audience filtering returns zero results", async () => {
