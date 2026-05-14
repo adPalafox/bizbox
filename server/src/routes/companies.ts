@@ -14,6 +14,7 @@ import {
 } from "@paperclipai/shared";
 import { badRequest, forbidden } from "../errors.js";
 import { validate } from "../middleware/validate.js";
+import { companyBuilderRoutes } from "./builder.js";
 import {
   accessService,
   agentService,
@@ -34,6 +35,8 @@ export function companyRoutes(db: Db, storage?: StorageService) {
   const access = accessService(db);
   const budgets = budgetService(db);
   const feedback = feedbackService(db);
+
+  router.use("/:companyId/builder", companyBuilderRoutes(db));
 
   function parseBooleanQuery(value: unknown) {
     return value === true || value === "true" || value === "1";

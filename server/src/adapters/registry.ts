@@ -64,14 +64,6 @@ import {
   models as ottoAgentModels,
 } from "@paperclipai/adapter-otto-agent";
 import {
-  execute as openAiAgentExecute,
-  testEnvironment as openAiAgentTestEnvironment,
-} from "@paperclipai/adapter-openai-agent/server";
-import {
-  agentConfigurationDoc as openAiAgentConfigurationDoc,
-  models as openAiAgentModels,
-} from "@paperclipai/adapter-openai-agent";
-import {
   execute as clickUpAgentRefExecute,
   testEnvironment as clickUpAgentRefTestEnvironment,
 } from "@paperclipai/adapter-clickup-agent-ref/server";
@@ -232,17 +224,6 @@ const ottoAgentAdapter: ServerAdapterModule = {
   agentConfigurationDoc: ottoAgentConfigurationDoc,
 };
 
-const openAiAgentAdapter: ServerAdapterModule = {
-  type: "openai_agent",
-  execute: openAiAgentExecute,
-  testEnvironment: openAiAgentTestEnvironment,
-  models: openAiAgentModels,
-  supportsLocalAgentJwt: false,
-  supportsInstructionsBundle: false,
-  requiresMaterializedRuntimeSkills: false,
-  agentConfigurationDoc: openAiAgentConfigurationDoc,
-};
-
 const clickUpAgentRefAdapter: ServerAdapterModule = {
   type: "clickup_agent_ref",
   execute: clickUpAgentRefExecute,
@@ -379,7 +360,6 @@ function registerBuiltInAdapters() {
     geminiLocalAdapter,
     openclawGatewayAdapter,
     ottoAgentAdapter,
-    openAiAgentAdapter,
     clickUpAgentRefAdapter,
     hermesLocalAdapter,
     processAdapter,
@@ -488,7 +468,6 @@ export function getServerAdapter(type: string): ServerAdapterModule {
   // Defensive fallback for built-in adapters that must never degrade into the
   // generic process adapter due to registry churn during dev hot reloads.
   if (type === "clickup_agent_ref") return clickUpAgentRefAdapter;
-  if (type === "openai_agent") return openAiAgentAdapter;
 
   return processAdapter;
 }

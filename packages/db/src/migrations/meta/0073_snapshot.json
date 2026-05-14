@@ -1,6 +1,6 @@
 {
-  "id": "b7f9cae0-0453-4577-aeb5-ea4da27cb018",
-  "prevId": "03f9cda2-3919-42ee-b8ad-277516e4815d",
+  "id": "5645a86a-3be6-4168-9d96-7a3fbba33ba5",
+  "prevId": "b7f9cae0-0453-4577-aeb5-ea4da27cb018",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9968,6 +9968,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'human'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -11628,6 +11635,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'none'"
+        },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'human'"
         },
         "is_primary": {
           "name": "is_primary",

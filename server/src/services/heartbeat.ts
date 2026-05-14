@@ -56,6 +56,7 @@ import { secretService } from "./secrets.js";
 import { resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
 import {
   buildHeartbeatRunIssueComment,
+  extractHeartbeatRunIssueDocumentPromotions,
   HEARTBEAT_RUN_RESULT_OUTPUT_MAX_CHARS,
   HEARTBEAT_RUN_RESULT_SUMMARY_MAX_CHARS,
   HEARTBEAT_RUN_SAFE_RESULT_JSON_MAX_BYTES,
@@ -90,6 +91,7 @@ import {
 import { issueService } from "./issues.js";
 import { agentThreadService } from "./agent-threads.js";
 import { clickupBridgeService } from "./clickup-bridge.js";
+import { documentService } from "./documents.js";
 import { workProductService } from "./work-products.js";
 import { recordRunStatus } from "../otel.js";
 import {
@@ -2012,6 +2014,7 @@ export function heartbeatService(db: Db) {
   const secretsSvc = secretService(db);
   const companySkills = companySkillService(db);
   const issuesSvc = issueService(db);
+  const documentsSvc = documentService(db);
   const workProductsSvc = workProductService(db);
   const agentThreadsSvc = agentThreadService(db);
   const clickupBridge = clickupBridgeService(db);
@@ -3938,6 +3941,7 @@ export function heartbeatService(db: Db) {
         url: metadata.contentPath,
         status: "ready_for_review",
         reviewState: "none",
+        audience: "human",
         isPrimary: index === primaryIndex,
         healthStatus: "healthy",
         summary: artifact.summary ?? null,
@@ -6580,6 +6584,46 @@ export function heartbeatService(db: Db) {
         const livenessRun = finalizedRun;
         await refreshContinuationSummaryForRun(livenessRun, agent);
         if (issueId && outcome === "succeeded") {
+          for (const promotion of extractHeartbeatRunIssueDocumentPromotions(persistedResultJson)) {
+            try {
+              const existingDocument = await documentsSvc.getIssueDocumentByKey(issueId, promotion.key);
+              const result = await documentsSvc.upsertIssueDocument({
+                issueId,
+                key: promotion.key,
+                title: promotion.title,
+                format: "markdown",
+                body: promotion.body,
+                changeSummary: "Promoted from heartbeat run summary",
+                baseRevisionId: existingDocument?.latestRevisionId ?? null,
+                audience: "internal",
+                createdByAgentId: agent.id,
+                createdByRunId: livenessRun.id,
+              });
+              await logActivity(db, {
+                companyId: livenessRun.companyId,
+                actorType: "agent",
+                actorId: agent.id,
+                agentId: agent.id,
+                runId: livenessRun.id,
+                action: result.created ? "issue.document_created" : "issue.document_updated",
+                entityType: "issue",
+                entityId: issueId,
+                details: {
+                  key: result.document.key,
+                  documentId: result.document.id,
+                  title: result.document.title,
+                  format: result.document.format,
+                  revisionNumber: result.document.latestRevisionNumber,
+                  source: "heartbeat_run_summary_promotion",
+                },
+              });
+            } catch (err) {
+              await onLog(
+                "stderr",
+                `[paperclip] Failed to promote heartbeat run summary document "${promotion.key}": ${err instanceof Error ? err.message : String(err)}\n`,
+              );
+            }
+          }
           try {
             const existingRunComment = await findRunIssueComment(livenessRun.id, livenessRun.companyId, issueId);
             if (!existingRunComment) {
@@ -7898,13 +7942,14 @@ export function heartbeatService(db: Db) {
       .set({
         status: "closed",
         nextPollAt: null,
-        lastError: reason,
+        closeReason: reason,
+        lastError: null,
         updatedAt: new Date(),
       })
       .where(
         and(
           eq(clickupBridges.id, clickupBridgeId),
-          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
         ),
       );
   }
@@ -7983,9 +8028,9 @@ export function heartbeatService(db: Db) {
           resultJson: mergeRunStopMetadataForAgent(agent, "cancelled", {
             resultJson: parseObject(run.resultJson),
             errorCode: "cancelled",
-          errorMessage: reason,
-        }),
-      } : {}),
+            errorMessage: reason,
+          }),
+        } : {}),
       });
       if (cancelled) {
         await closeClickUpBridgeForRun(cancelled, reason);
@@ -8018,12 +8063,13 @@ export function heartbeatService(db: Db) {
       .set({
         status: "closed",
         nextPollAt: null,
-        lastError: reason,
+        closeReason: reason,
+        lastError: null,
         updatedAt: new Date(),
       })
       .where(
         and(
-          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply", "agent_replied"]),
+          inArray(clickupBridges.status, ["pending_clickup_task", "waiting_for_agent_reply"]),
           sql`${clickupBridges.id} in (
             select cast(bridge_ids.bridge_id as uuid)
             from (

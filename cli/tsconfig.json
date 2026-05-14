@@ -5,9 +5,6 @@
     "rootDir": "..",
     "baseUrl": ".",
     "paths": {
-      "@paperclipai/adapter-openai-agent": ["../packages/adapters/openai-agent/dist/index.d.ts"],
-      "@paperclipai/adapter-openai-agent/server": ["../packages/adapters/openai-agent/dist/server/index.d.ts"],
-      "@paperclipai/adapter-openai-agent/cli": ["../packages/adapters/openai-agent/dist/cli/index.d.ts"],
       "@paperclipai/adapter-clickup-agent-ref": ["../packages/adapters/clickup-agent-ref/dist/index.d.ts"],
       "@paperclipai/adapter-clickup-agent-ref/server": ["../packages/adapters/clickup-agent-ref/dist/server/index.d.ts"],
       "@paperclipai/adapter-clickup-agent-ref/cli": ["../packages/adapters/clickup-agent-ref/dist/cli/index.d.ts"]

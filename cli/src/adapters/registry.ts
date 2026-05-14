@@ -6,7 +6,6 @@ import { printGeminiStreamEvent } from "@paperclipai/adapter-gemini-local/cli";
 import { printOpenCodeStreamEvent } from "@paperclipai/adapter-opencode-local/cli";
 import { printPiStreamEvent } from "@paperclipai/adapter-pi-local/cli";
 import { printOpenClawGatewayStreamEvent } from "@paperclipai/adapter-openclaw-gateway/cli";
-import { printOpenAiAgentStreamEvent } from "@paperclipai/adapter-openai-agent/cli";
 import { printClickUpAgentRefStreamEvent } from "@paperclipai/adapter-clickup-agent-ref/cli";
 import { processCLIAdapter } from "./process/index.js";
 import { httpCLIAdapter } from "./http/index.js";
@@ -46,11 +45,6 @@ const openclawGatewayCLIAdapter: CLIAdapterModule = {
   formatStdoutEvent: printOpenClawGatewayStreamEvent,
 };
 
-const openAiAgentCLIAdapter: CLIAdapterModule = {
-  type: "openai_agent",
-  formatStdoutEvent: printOpenAiAgentStreamEvent,
-};
-
 const clickUpAgentRefCLIAdapter: CLIAdapterModule = {
   type: "clickup_agent_ref",
   formatStdoutEvent: printClickUpAgentRefStreamEvent,
@@ -65,7 +59,6 @@ const adaptersByType = new Map<string, CLIAdapterModule>(
     cursorLocalCLIAdapter,
     geminiLocalCLIAdapter,
     openclawGatewayCLIAdapter,
-    openAiAgentCLIAdapter,
     clickUpAgentRefCLIAdapter,
     processCLIAdapter,
     httpCLIAdapter,
