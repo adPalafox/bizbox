@@ -135,6 +135,8 @@ export type {
   IssueExecutionStagePrincipal,
   IssueExecutionDecision,
   IssueComment,
+  PendingHumanInboxInteraction,
+  PendingHumanInboxInteractionIssue,
   IssueThreadInteractionActorFields,
   SuggestedTaskDraft,
   SuggestTasksPayload,
