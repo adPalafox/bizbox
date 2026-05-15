@@ -76,7 +76,10 @@ import {
 } from "./issue-liveness.js";
 import { logActivity, publishPluginDomainEvent, type LogActivityInput } from "./activity-log.js";
 import { maybeLogAwaitingHumanHandoff } from "./awaiting-human-handoff.js";
-import { detectClickUpAwaitingHumanApproval } from "./awaiting-human-notifications.js";
+import {
+  detectClickUpAwaitingHumanApproval,
+  processAwaitingHumanNotificationOutbox,
+} from "./awaiting-human-notifications.js";
 import {
   buildWorkspaceReadyComment,
   cleanupExecutionWorkspaceArtifacts,
@@ -93,7 +96,7 @@ import { agentThreadService } from "./agent-threads.js";
 import { clickupBridgeService } from "./clickup-bridge.js";
 import { documentService } from "./documents.js";
 import { workProductService } from "./work-products.js";
-import { recordRunStatus } from "../otel.js";
+import { recordComment, recordRunStatus } from "../otel.js";
 import {
   getIssueContinuationSummaryDocument,
   refreshIssueContinuationSummary,
@@ -6909,6 +6912,7 @@ export function heartbeatService(db: Db) {
         .select({
           id: issues.id,
           companyId: issues.companyId,
+          projectId: issues.projectId,
           identifier: issues.identifier,
           status: issues.status,
           assigneeAgentId: issues.assigneeAgentId,
@@ -7144,12 +7148,39 @@ export function heartbeatService(db: Db) {
             updatedAt: new Date(),
           })
           .where(eq(issues.id, issue.id));
+        const [insertedComment] = await tx
+          .insert(issueComments)
+          .values({
+            companyId: issue.companyId,
+            issueId: issue.id,
+            authorAgentId: null,
+            authorUserId: null,
+            createdByRunId: run.id,
+            source: "native",
+            body: comment,
+          })
+          .onConflictDoNothing()
+          .returning({ id: issueComments.id });
+        if (insertedComment) {
+          await tx
+            .update(issues)
+            .set({ updatedAt: new Date() })
+            .where(eq(issues.id, issue.id));
+          recordComment({
+            company_id: issue.companyId,
+            project_id: issue.projectId ?? undefined,
+            issue_status: issue.status,
+            actor_type: "system",
+            commenter_id: run.id,
+            assignee_agent_id: issue.assigneeAgentId ?? undefined,
+            assignee_user_id: issue.assigneeUserId ?? undefined,
+          });
+        }
         return {
           kind: "blocked" as const,
           issueId: issue.id,
           issueIdentifier: issue.identifier,
           previousStatus: issue.status,
-          comment,
         };
       }
 
@@ -7227,7 +7258,6 @@ export function heartbeatService(db: Db) {
     });
 
     if (promotionResult?.kind === "blocked") {
-      await issuesSvc.addComment(promotionResult.issueId, promotionResult.comment, {});
       await logActivity(db, {
         companyId: run.companyId,
         actorType: "system",
@@ -8371,6 +8401,7 @@ export function heartbeatService(db: Db) {
 
     processClickupOutbound: async () => {
       await clickupBridge.processOutbound();
+      await processAwaitingHumanNotificationOutbox(db, { storage });
     },
 
     pollClickupInbound: async () => {
