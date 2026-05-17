@@ -97,7 +97,7 @@ const INBOX_HEARTBEAT_RUN_LIMIT = 200;
 const INBOX_ISSUE_LIST_LIMIT = 500;
 import { Input } from "@/components/ui/input";
 import { PageTabBar } from "../components/PageTabBar";
-import type { Approval, HeartbeatRun, Issue, JoinRequest, PendingHumanInboxInteraction } from "@paperclipai/shared";
+import type { Approval, HeartbeatRun, Issue, IssueRelationIssueSummary, JoinRequest, PendingHumanInboxInteraction } from "@paperclipai/shared";
 import {
   ACTIONABLE_APPROVAL_STATUSES,
   DEFAULT_INBOX_ISSUE_COLUMNS,
@@ -191,6 +191,58 @@ function readIssueIdFromRun(run: HeartbeatRun): string | null {
 function nonEmptyLabel(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function issueFromRelationSummary(issue: IssueRelationIssueSummary): Issue {
+  const now = new Date(0);
+  return {
+    id: issue.id,
+    companyId: "",
+    projectId: null,
+    projectWorkspaceId: null,
+    goalId: null,
+    parentId: null,
+    title: issue.title,
+    description: null,
+    status: issue.status,
+    priority: issue.priority,
+    assigneeAgentId: issue.assigneeAgentId,
+    assigneeUserId: issue.assigneeUserId,
+    checkoutRunId: null,
+    executionRunId: null,
+    executionAgentNameKey: null,
+    executionLockedAt: null,
+    createdByAgentId: null,
+    createdByUserId: null,
+    issueNumber: null,
+    identifier: issue.identifier,
+    originKind: undefined,
+    originId: null,
+    originRunId: null,
+    originThreadId: null,
+    originThreadMessageId: null,
+    originFingerprint: null,
+    requestDepth: 0,
+    billingCode: null,
+    assigneeAdapterOverrides: null,
+    executionPolicy: null,
+    executionState: null,
+    executionWorkspaceId: null,
+    executionWorkspacePreference: null,
+    executionWorkspaceSettings: null,
+    startedAt: null,
+    completedAt: null,
+    cancelledAt: null,
+    hiddenAt: null,
+    createdAt: now,
+    updatedAt: now,
+    labels: [],
+    labelIds: [],
+    lastActivityAt: now,
+    myLastTouchAt: null,
+    lastExternalCommentAt: null,
+    isUnreadForMe: false,
+  };
 }
 
 export function formatJoinRequestInboxLabel(
@@ -880,10 +932,11 @@ export function Inbox() {
   });
 
   const { data: issues, isLoading: isIssuesLoading } = useQuery({
-    queryKey: [...queryKeys.issues.list(selectedCompanyId!), "with-routine-executions"],
+    queryKey: [...queryKeys.issues.list(selectedCompanyId!), "with-routine-executions", "with-related-work"],
     queryFn: () =>
       issuesApi.list(selectedCompanyId!, {
         includeRoutineExecutions: true,
+        includeRelatedWork: true,
         limit: INBOX_ISSUE_LIST_LIMIT,
       }),
     enabled: !!selectedCompanyId,
@@ -892,13 +945,14 @@ export function Inbox() {
     data: mineIssuesRaw = [],
     isLoading: isMineIssuesLoading,
   } = useQuery({
-    queryKey: [...queryKeys.issues.listMineByMe(selectedCompanyId!), "with-routine-executions"],
+    queryKey: [...queryKeys.issues.listMineByMe(selectedCompanyId!), "with-routine-executions", "with-related-work"],
     queryFn: () =>
       issuesApi.list(selectedCompanyId!, {
         touchedByUserId: "me",
         inboxArchivedByUserId: "me",
         status: INBOX_MINE_ISSUE_STATUS_FILTER,
         includeRoutineExecutions: true,
+        includeRelatedWork: true,
         limit: INBOX_ISSUE_LIST_LIMIT,
       }),
     enabled: !!selectedCompanyId,
@@ -907,12 +961,13 @@ export function Inbox() {
     data: touchedIssuesRaw = [],
     isLoading: isTouchedIssuesLoading,
   } = useQuery({
-    queryKey: [...queryKeys.issues.listTouchedByMe(selectedCompanyId!), "with-routine-executions"],
+    queryKey: [...queryKeys.issues.listTouchedByMe(selectedCompanyId!), "with-routine-executions", "with-related-work"],
     queryFn: () =>
       issuesApi.list(selectedCompanyId!, {
         touchedByUserId: "me",
         status: INBOX_MINE_ISSUE_STATUS_FILTER,
         includeRoutineExecutions: true,
+        includeRelatedWork: true,
         limit: INBOX_ISSUE_LIST_LIMIT,
       }),
     enabled: !!selectedCompanyId,
@@ -1282,12 +1337,14 @@ export function Inbox() {
     queryKey: [
       ...queryKeys.issues.search(selectedCompanyId!, normalizedSearchQuery, undefined, 25),
       "inbox-supplement",
+      "with-related-work",
     ],
     queryFn: () =>
       issuesApi.list(selectedCompanyId!, {
         q: normalizedSearchQuery,
         limit: 25,
         includeRoutineExecutions: true,
+        includeRelatedWork: true,
       }),
     enabled: shouldUseIssueSearchSupplement,
     placeholderData: (previousData) => previousData,
@@ -1405,7 +1462,7 @@ export function Inbox() {
   const childFlatIndex = useMemo(() => {
     const map = new Map<string, number>();
     flatNavItems.forEach((entry, index) => {
-      if (entry.type === "child") map.set(entry.issueId, index);
+      if (entry.type === "child") map.set(entry.rowKey, index);
     });
     return map;
   }, [flatNavItems]);
@@ -1850,7 +1907,11 @@ export function Inbox() {
       const resolveNavEntry = (idx: number): { issue?: Issue; item?: InboxWorkItem } => {
         const entry = navItems[idx];
         if (!entry) return {};
-        if (entry.type === "child") return { issue: entry.issue };
+        if (entry.type === "child") {
+          return {
+            issue: "companyId" in entry.issue ? entry.issue : issueFromRelationSummary(entry.issue),
+          };
+        }
         if (entry.type === "top") return { item: entry.item };
         return {};
       };
@@ -2614,15 +2675,23 @@ export function Inbox() {
                     }
 
                     const issue = item.issue;
-                    const childIssues = group.childrenByIssueId.get(issue.id) ?? [];
-                    const hasChildren = childIssues.length > 0;
-                    const isExpanded = hasChildren && !collapsedInboxParents.has(issue.id);
+                    const nestedRows = group.nestedByIssueId.get(issue.id) ?? {
+                      children: [],
+                      outbound: [],
+                      inbound: [],
+                    };
+                    const childIssues = nestedRows.children;
+                    const outboundReferences = nestedRows.outbound;
+                    const inboundReferences = nestedRows.inbound;
+                    const hasNestedRows =
+                      childIssues.length > 0 || outboundReferences.length > 0 || inboundReferences.length > 0;
+                    const isExpanded = hasNestedRows && !collapsedInboxParents.has(issue.id);
                     const canArchiveIssue = canArchiveFromTab && group.searchSection === "none";
                     const parentRow = renderInboxIssue({
                       issue,
                       depth: 0,
                       selected: isSelected,
-                      hasChildren,
+                      hasChildren: hasNestedRows,
                       isExpanded,
                       childCount: childIssues.length,
                       collapseParentId: issue.id,
@@ -2641,35 +2710,80 @@ export function Inbox() {
                     ) : parentRow));
 
                     if (isExpanded) {
-                      for (const child of childIssues) {
-                        const childNavIdx = childFlatIndex.get(child.id) ?? -1;
-                        const isChildSelected = selectedIndex === childNavIdx;
-                        const childRow = renderInboxIssue({
-                          issue: child,
+                      const renderNestedIssue = (
+                        nestedIssue: Issue,
+                        rowKey: string,
+                        selectedNavIndex: number,
+                      ) => {
+                        const isNestedSelected = selectedIndex === selectedNavIndex;
+                        const nestedRow = renderInboxIssue({
+                          issue: nestedIssue,
                           depth: 1,
-                          selected: isChildSelected,
+                          selected: isNestedSelected,
                           allowArchive: canArchiveIssue,
                         });
-                        const isChildArchiving = archivingIssueIds.has(child.id);
-                        elements.push(
+                        const isNestedArchiving = archivingIssueIds.has(nestedIssue.id);
+                        return (
                           <div
-                            key={`sel-issue:${child.id}`}
+                            key={`sel-${rowKey}`}
                             data-inbox-item
                             className="relative"
-                            onClick={() => setSelectedIndex(childNavIdx)}
+                            onClick={() => setSelectedIndex(selectedNavIndex)}
                           >
                             {canArchiveIssue ? (
                               <SwipeToArchive
-                                key={`issue:${child.id}`}
-                                selected={isChildSelected}
-                                disabled={isChildArchiving || archiveIssueMutation.isPending}
-                                onArchive={() => archiveIssueMutation.mutate(child.id)}
+                                key={`issue:${nestedIssue.id}`}
+                                selected={isNestedSelected}
+                                disabled={isNestedArchiving || archiveIssueMutation.isPending}
+                                onArchive={() => archiveIssueMutation.mutate(nestedIssue.id)}
                               >
-                                {childRow}
+                                {nestedRow}
                               </SwipeToArchive>
-                            ) : childRow}
+                            ) : nestedRow}
+                          </div>
+                        );
+                      };
+
+                      for (const child of childIssues) {
+                        const rowKey = `child:${issue.id}:${child.id}`;
+                        const childNavIdx = childFlatIndex.get(rowKey) ?? -1;
+                        elements.push(renderNestedIssue(child, rowKey, childNavIdx));
+                      }
+
+                      if (outboundReferences.length > 0) {
+                        elements.push(
+                          <div
+                            key={`nested-label:outbound:${issue.id}`}
+                            className="px-4 py-1.5 sm:px-5"
+                          >
+                            <span className="pl-8 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">
+                              References
+                            </span>
                           </div>,
                         );
+                        for (const relatedIssue of outboundReferences) {
+                          const rowKey = `outbound:${issue.id}:${relatedIssue.id}`;
+                          const relatedNavIdx = childFlatIndex.get(rowKey) ?? -1;
+                          elements.push(renderNestedIssue(issueFromRelationSummary(relatedIssue), rowKey, relatedNavIdx));
+                        }
+                      }
+
+                      if (inboundReferences.length > 0) {
+                        elements.push(
+                          <div
+                            key={`nested-label:inbound:${issue.id}`}
+                            className="px-4 py-1.5 sm:px-5"
+                          >
+                            <span className="pl-8 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">
+                              Referenced by
+                            </span>
+                          </div>,
+                        );
+                        for (const relatedIssue of inboundReferences) {
+                          const rowKey = `inbound:${issue.id}:${relatedIssue.id}`;
+                          const relatedNavIdx = childFlatIndex.get(rowKey) ?? -1;
+                          elements.push(renderNestedIssue(issueFromRelationSummary(relatedIssue), rowKey, relatedNavIdx));
+                        }
                       }
                     }
                   }

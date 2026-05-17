@@ -7,6 +7,7 @@ import type {
   ExecutionWorkspace,
   HeartbeatRun,
   Issue,
+  IssueRelationIssueSummary,
   JoinRequest,
   ProjectWorkspace,
 } from "@paperclipai/shared";
@@ -209,6 +210,18 @@ function makeIssue(id: string, isUnreadForMe: boolean): Issue {
     lastExternalCommentAt: new Date("2026-03-11T01:00:00.000Z"),
     lastActivityAt: new Date("2026-03-11T01:00:00.000Z"),
     isUnreadForMe,
+  };
+}
+
+function makeRelatedIssueSummary(id: string): IssueRelationIssueSummary {
+  return {
+    id,
+    identifier: `PAP-${id}`,
+    title: `Related ${id}`,
+    status: "todo",
+    priority: "medium",
+    assigneeAgentId: null,
+    assigneeUserId: null,
   };
 }
 
@@ -579,7 +592,7 @@ describe("inbox helpers", () => {
         {
           key: "visible-group",
           displayItems: [{ kind: "issue", timestamp: 3, issue: visibleIssue }],
-          childrenByIssueId: new Map(),
+          nestedByIssueId: new Map(),
         },
         {
           key: "hidden-group",
@@ -587,7 +600,7 @@ describe("inbox helpers", () => {
             { kind: "issue", timestamp: 2, issue: hiddenIssue },
             { kind: "approval", timestamp: 1, approval },
           ],
-          childrenByIssueId: new Map(),
+          nestedByIssueId: new Map(),
         },
       ],
       new Set(["hidden-group"]),
@@ -612,7 +625,11 @@ describe("inbox helpers", () => {
       {
         key: "workspace:default",
         displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
-        childrenByIssueId: new Map([[parentIssue.id, [childIssue]]]),
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [childIssue],
+          outbound: [],
+          inbound: [],
+        }]]),
       },
     ];
 
@@ -620,22 +637,99 @@ describe("inbox helpers", () => {
       buildInboxKeyboardNavEntries(groupedSections, new Set(), new Set()).map((entry) => entry.type === "top"
         ? entry.itemKey
         : entry.type === "child"
-          ? entry.issueId
+          ? entry.rowKey
           : entry.groupKey),
     ).toEqual([
       `workspace:default:${getInboxWorkItemKey({ kind: "issue", timestamp: 2, issue: parentIssue })}`,
-      childIssue.id,
+      `child:${parentIssue.id}:${childIssue.id}`,
     ]);
 
     expect(
       buildInboxKeyboardNavEntries(groupedSections, new Set(), new Set([parentIssue.id])).map((entry) => entry.type === "top"
         ? entry.itemKey
         : entry.type === "child"
-          ? entry.issueId
+          ? entry.rowKey
           : entry.groupKey),
     ).toEqual([
       `workspace:default:${getInboxWorkItemKey({ kind: "issue", timestamp: 2, issue: parentIssue })}`,
     ]);
+  });
+
+  it("keeps child issues separate from nested references and excludes child duplicates from reference sections", () => {
+    const parentIssue = makeIssue("parent-with-related", true);
+    const childIssue = makeIssue("child-1", true);
+    childIssue.parentId = parentIssue.id;
+    const outboundOnly = makeRelatedIssueSummary("outbound-1");
+    const inboundOnly = makeRelatedIssueSummary("inbound-1");
+
+    parentIssue.relatedWork = {
+      outbound: [
+        { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
+        { issue: outboundOnly, mentionCount: 2, sources: [] },
+      ],
+      inbound: [
+        { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
+        { issue: inboundOnly, mentionCount: 1, sources: [] },
+      ],
+    };
+
+    const [grouped] = buildGroupedInboxSections(
+      [
+        { kind: "issue", timestamp: 5, issue: parentIssue },
+        { kind: "issue", timestamp: 4, issue: childIssue },
+      ],
+      "none",
+      {},
+      { nestingEnabled: true },
+    );
+
+    expect(grouped?.displayItems).toHaveLength(1);
+    const nestedRows = grouped?.nestedByIssueId.get(parentIssue.id);
+    expect(nestedRows?.children.map((issue) => issue.id)).toEqual([childIssue.id]);
+    expect(nestedRows?.outbound.map((issue) => issue.id)).toEqual([outboundOnly.id]);
+    expect(nestedRows?.inbound.map((issue) => issue.id)).toEqual([inboundOnly.id]);
+  });
+
+  it("adds outbound and inbound reference rows to keyboard navigation only when the parent is expanded", () => {
+    const parentIssue = makeIssue("parent-related-nav", true);
+    const outboundIssue = makeRelatedIssueSummary("outbound-nav");
+    const inboundIssue = makeRelatedIssueSummary("inbound-nav");
+
+    const entries = buildInboxKeyboardNavEntries(
+      [{
+        key: "workspace:default",
+        displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [],
+          outbound: [outboundIssue],
+          inbound: [inboundIssue],
+        }]]),
+      }],
+      new Set(),
+      new Set(),
+    );
+
+    expect(entries.map((entry) => entry.type === "child" ? entry.rowKey : entry.type)).toEqual([
+      "top",
+      `outbound:${parentIssue.id}:${outboundIssue.id}`,
+      `inbound:${parentIssue.id}:${inboundIssue.id}`,
+    ]);
+
+    const collapsedEntries = buildInboxKeyboardNavEntries(
+      [{
+        key: "workspace:default",
+        displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [],
+          outbound: [outboundIssue],
+          inbound: [inboundIssue],
+        }]]),
+      }],
+      new Set(),
+      new Set([parentIssue.id]),
+    );
+
+    expect(collapsedEntries.map((entry) => entry.type)).toEqual(["top"]);
   });
 
   it("emits a group nav entry for labeled groups and omits children when the group is collapsed", () => {
@@ -646,13 +740,13 @@ describe("inbox helpers", () => {
         key: "priority:high",
         label: "High priority",
         displayItems: [{ kind: "issue", timestamp: 3, issue: visibleIssue } satisfies InboxWorkItem],
-        childrenByIssueId: new Map(),
+        nestedByIssueId: new Map(),
       },
       {
         key: "priority:medium",
         label: "Medium priority",
         displayItems: [{ kind: "issue", timestamp: 2, issue: hiddenIssue } satisfies InboxWorkItem],
-        childrenByIssueId: new Map(),
+        nestedByIssueId: new Map(),
       },
     ];
 

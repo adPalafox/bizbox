@@ -31,4 +31,16 @@ describe("issuesApi.list", () => {
       "/companies/company-1/issues?workspaceId=workspace-1&limit=1000",
     );
   });
+
+  it("passes includeRelatedWork through to the company issues endpoint", async () => {
+    await issuesApi.list("company-1", {
+      includeRoutineExecutions: true,
+      includeRelatedWork: true,
+      limit: 10,
+    });
+
+    expect(mockApi.get).toHaveBeenCalledWith(
+      "/companies/company-1/issues?includeRoutineExecutions=true&includeRelatedWork=true&limit=10",
+    );
+  });
 });

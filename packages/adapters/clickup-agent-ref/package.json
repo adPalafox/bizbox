@@ -19,8 +19,6 @@
     "./ui": "./src/ui/index.ts",
     "./cli": "./src/cli/index.ts"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "publishConfig": {
     "access": "public",
     "exports": {

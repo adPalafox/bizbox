@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
+import { buildClickUpContextBody, buildCommentPayload } from "../../../packages/adapters/clickup-agent-ref/src/server/index.ts";
 import { agentThreads, agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
 import { parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { issueService } from "./issues.js";
