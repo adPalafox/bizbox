@@ -153,20 +153,28 @@ function buildIssueLayout(graph: IssueGraphResponse) {
     return Math.max(ISSUE_H, agentStackHeight, deliverableStackHeight, ROW_GAP);
   };
 
-  const measure = (issueId: string): number => {
+  const measure = (issueId: string, visited: Set<string>): number => {
+    if (visited.has(issueId)) {
+      return subtreeHeights.get(issueId) ?? issueFootprintHeight(issueId);
+    }
+    visited.add(issueId);
     const children = childMap.get(issueId) ?? [];
     const ownHeight = issueFootprintHeight(issueId);
     if (children.length === 0) {
       subtreeHeights.set(issueId, ownHeight);
+      visited.delete(issueId);
       return ownHeight;
     }
-    const childrenHeight = children.reduce((sum, childId) => sum + measure(childId), 0);
+    const childrenHeight = children.reduce((sum, childId) => sum + measure(childId, visited), 0);
     const total = Math.max(ownHeight, childrenHeight);
     subtreeHeights.set(issueId, total);
+    visited.delete(issueId);
     return total;
   };
 
-  const position = (issueId: string, startY: number) => {
+  const position = (issueId: string, startY: number, visited: Set<string>) => {
+    if (visited.has(issueId)) return;
+    visited.add(issueId);
     const subtreeHeight = subtreeHeights.get(issueId) ?? ROW_GAP;
     const depth = depthMap.get(issueId) ?? 0;
     issueRects.set(issueId, {
@@ -180,13 +188,14 @@ function buildIssueLayout(graph: IssueGraphResponse) {
 
     let cursorY = startY;
     for (const childId of childMap.get(issueId) ?? []) {
-      position(childId, cursorY);
+      position(childId, cursorY, visited);
       cursorY += subtreeHeights.get(childId) ?? ROW_GAP;
     }
+    visited.delete(issueId);
   };
 
-  measure(graph.rootIssueId);
-  position(graph.rootIssueId, 0);
+  measure(graph.rootIssueId, new Set<string>());
+  position(graph.rootIssueId, 0, new Set<string>());
 
   const detailRects = new Map<string, LayoutRect>();
   for (const issue of graph.issues) {
@@ -495,6 +504,7 @@ export function IssueGraph() {
                 )}
                 style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
                 onClick={() => navigate(`/issues/${issue.identifier ?? issue.id}`)}
+                onMouseDown={(event) => event.stopPropagation()}
                 data-node-kind="issue"
                 data-selected={isSelectedIssue ? "true" : "false"}
               >
@@ -529,6 +539,7 @@ export function IssueGraph() {
                   className="absolute flex items-center gap-2 rounded-lg border border-border bg-background/95 px-3 text-left shadow-xs hover:border-primary/40"
                   style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
                   onClick={() => navigate(`/agents/${agent.urlKey}`)}
+                  onMouseDown={(event) => event.stopPropagation()}
                   data-node-kind="agent"
                 >
                   <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted">
