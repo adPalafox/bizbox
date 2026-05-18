@@ -1026,7 +1026,7 @@ export function issueRoutes(
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    const graph = await svc.getGraph(id);
+    const graph = await svc.getGraph(issue);
     if (!graph) {
       res.status(404).json({ error: "Issue not found" });
       return;

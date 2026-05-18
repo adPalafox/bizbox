@@ -5,11 +5,13 @@ import { errorHandler } from "../middleware/index.js";
 
 const mockIssueService = vi.hoisted(() => ({
   getById: vi.fn(),
+  getByIdentifier: vi.fn(),
   getGraph: vi.fn(),
 }));
 
 vi.mock("@paperclipai/shared/telemetry", () => ({
   trackAgentTaskCompleted: vi.fn(),
+  trackErrorHandlerCrash: vi.fn(),
 }));
 
 vi.mock("../telemetry.js", () => ({
@@ -117,6 +119,7 @@ function createApp(companyIds: string[] = ["company-1"]) {
 describe("issue graph routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIssueService.getByIdentifier.mockResolvedValue(null);
     mockIssueService.getGraph.mockResolvedValue({
       rootIssueId: "issue-root",
       issues: [],
@@ -127,9 +130,18 @@ describe("issue graph routes", () => {
   });
 
   it("resolves graph requests by identifier and uuid", async () => {
+    mockIssueService.getByIdentifier.mockResolvedValue({
+      id: "issue-root",
+      companyId: "company-1",
+      parentId: null,
+      title: "Root issue",
+      status: "todo",
+      priority: "medium",
+    });
     mockIssueService.getById.mockResolvedValue({
       id: "issue-root",
       companyId: "company-1",
+      parentId: null,
       title: "Root issue",
       status: "todo",
       priority: "medium",
@@ -141,16 +153,29 @@ describe("issue graph routes", () => {
 
     expect(identifierRes.status).toBe(200);
     expect(uuidRes.status).toBe(200);
-    expect(mockIssueService.getById).toHaveBeenCalledWith("PAP-2");
+    expect(mockIssueService.getByIdentifier).toHaveBeenCalledWith("PAP-2");
+    expect(mockIssueService.getById).toHaveBeenCalledWith("issue-root");
     expect(mockIssueService.getById).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111");
-    expect(mockIssueService.getGraph).toHaveBeenCalledWith("PAP-2");
-    expect(mockIssueService.getGraph).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111");
+    expect(mockIssueService.getGraph).toHaveBeenCalledWith(expect.objectContaining({
+      id: "issue-root",
+      companyId: "company-1",
+      parentId: null,
+    }));
   });
 
   it("rejects graph access outside the actor's company scope", async () => {
+    mockIssueService.getByIdentifier.mockResolvedValue({
+      id: "issue-root",
+      companyId: "company-2",
+      parentId: null,
+      title: "Root issue",
+      status: "todo",
+      priority: "medium",
+    });
     mockIssueService.getById.mockResolvedValue({
       id: "issue-root",
       companyId: "company-2",
+      parentId: null,
       title: "Root issue",
       status: "todo",
       priority: "medium",

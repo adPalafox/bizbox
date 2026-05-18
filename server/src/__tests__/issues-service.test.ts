@@ -1171,6 +1171,51 @@ describeEmbeddedPostgres("issueService.list participantAgentId", () => {
     expect(graphByIdentifier?.edges.some((edge) => edge.kind === "issue-deliverable" && edge.deliverableId === artifactId)).toBe(true);
     expect(graphByIdentifier?.edges.some((edge) => edge.kind === "issue-deliverable" && edge.deliverableId === issueDocumentId)).toBe(true);
   });
+
+  it("rejects cyclic issue hierarchies when building a rooted pipeline", async () => {
+    const companyId = randomUUID();
+    const firstIssueId = randomUUID();
+    const secondIssueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: "PAP",
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(issues).values([
+      {
+        id: firstIssueId,
+        companyId,
+        issueNumber: 1,
+        identifier: "PAP-1",
+        title: "First issue",
+        status: "todo",
+        priority: "medium",
+      },
+      {
+        id: secondIssueId,
+        companyId,
+        parentId: firstIssueId,
+        issueNumber: 2,
+        identifier: "PAP-2",
+        title: "Second issue",
+        status: "todo",
+        priority: "medium",
+      },
+    ]);
+
+    await db
+      .update(issues)
+      .set({ parentId: secondIssueId })
+      .where(eq(issues.id, firstIssueId));
+
+    await expect(svc.getGraph("PAP-1")).rejects.toMatchObject({
+      status: 409,
+      message: "Issue hierarchy contains a cycle",
+    });
+  });
 });
 
 describeEmbeddedPostgres("issueService.create workspace inheritance", () => {

@@ -66,8 +66,8 @@ import {
 import {
   execute as clickUpAgentRefExecute,
   testEnvironment as clickUpAgentRefTestEnvironment,
-} from "../../../packages/adapters/clickup-agent-ref/dist/server/index.js";
-import * as clickUpAgentRefPackage from "../../../packages/adapters/clickup-agent-ref/dist/index.js";
+} from "@paperclipai/adapter-clickup-agent-ref/server";
+import * as clickUpAgentRefPackage from "@paperclipai/adapter-clickup-agent-ref";
 import { listCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {

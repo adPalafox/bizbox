@@ -121,6 +121,14 @@ export interface IssueFilters {
 }
 
 type IssueRow = typeof issues.$inferSelect;
+
+function toRowArray<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && Array.isArray((result as { rows?: unknown[] }).rows)) {
+    return (result as { rows: T[] }).rows;
+  }
+  return [];
+}
 type IssueLabelRow = typeof labels.$inferSelect;
 type IssueActiveRunRow = {
   id: string;
@@ -954,25 +962,49 @@ export function issueService(db: Db) {
   }
 
   async function getTopmostAncestorRow(issue: Pick<IssueRow, "companyId" | "id" | "parentId">): Promise<IssueRow> {
-    let currentId = issue.id;
-    let parentId = issue.parentId;
+    const rows = await db.execute<{ current_id: string; depth: number; has_cycle: boolean }>(sql`
+      WITH RECURSIVE ancestor_chain AS (
+        SELECT
+          i.id AS current_id,
+          i.parent_id,
+          ARRAY[i.id]::uuid[] AS visited_ids,
+          0 AS depth,
+          false AS has_cycle
+        FROM issues i
+        WHERE i.company_id = ${issue.companyId}
+          AND i.id = ${issue.id}
 
-    while (parentId) {
-      const parent = await db
-        .select()
-        .from(issues)
-        .where(and(eq(issues.companyId, issue.companyId), eq(issues.id, parentId)))
-        .then((rows) => rows[0] ?? null);
-      if (!parent) break;
-      currentId = parent.id;
-      parentId = parent.parentId;
+        UNION ALL
+
+        SELECT
+          parent.id AS current_id,
+          parent.parent_id,
+          ancestor_chain.visited_ids || parent.id,
+          ancestor_chain.depth + 1,
+          parent.id = ANY(ancestor_chain.visited_ids) AS has_cycle
+        FROM ancestor_chain
+        JOIN issues parent
+          ON parent.company_id = ${issue.companyId}
+         AND parent.id = ancestor_chain.parent_id
+        WHERE ancestor_chain.parent_id IS NOT NULL
+          AND NOT ancestor_chain.has_cycle
+      )
+      SELECT ancestor_chain.current_id, ancestor_chain.depth, ancestor_chain.has_cycle
+      FROM ancestor_chain
+      ORDER BY ancestor_chain.depth DESC
+    `);
+
+    const chain = toRowArray<{ current_id: string; depth: number; has_cycle: boolean }>(rows);
+    if (chain.length === 0) throw notFound("Issue not found");
+    if (chain.some((row) => row.has_cycle)) {
+      throw conflict("Issue hierarchy contains a cycle");
     }
-
+    const rootId = chain[0]?.current_id;
     const root = await db
       .select()
       .from(issues)
-      .where(and(eq(issues.companyId, issue.companyId), eq(issues.id, currentId)))
-      .then((rows) => rows[0] ?? null);
+      .where(and(eq(issues.companyId, issue.companyId), eq(issues.id, rootId)))
+      .then((result) => result[0] ?? null);
     if (!root) throw notFound("Issue not found");
     return root;
   }
@@ -1003,8 +1035,13 @@ export function issueService(db: Db) {
     return [...rowsById.values()];
   }
 
-  async function buildIssueGraph(raw: string): Promise<IssueGraphResponse | null> {
-    const selectedIssue = await getIssueByReference(raw);
+  async function buildIssueGraph(
+    input: string | Pick<IssueRow, "companyId" | "id" | "parentId">,
+  ): Promise<IssueGraphResponse | null> {
+    const selectedIssue =
+      typeof input === "string"
+        ? await getIssueByReference(input)
+        : input;
     if (!selectedIssue) return null;
 
     const rootRow = await getTopmostAncestorRow(selectedIssue);
@@ -2101,8 +2138,8 @@ export function issueService(db: Db) {
       return getIssueByIdentifier(identifier);
     },
 
-    getGraph: async (raw: string) => {
-      return buildIssueGraph(raw);
+    getGraph: async (input: string | Pick<IssueRow, "companyId" | "id" | "parentId">) => {
+      return buildIssueGraph(input);
     },
 
     getRelationSummaries: async (issueId: string) => {
