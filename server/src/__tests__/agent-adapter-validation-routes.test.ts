@@ -450,6 +450,58 @@ describe("agent routes adapter validation", () => {
     expect(String(adapterConfig?.devicePrivateKeyPem ?? "")).toContain("BEGIN PRIVATE KEY");
   });
 
+  it("preserves an existing OpenClaw device key on update", async () => {
+    const existingDevicePrivateKeyPem =
+      "-----BEGIN PRIVATE KEY-----\nexisting\n-----END PRIVATE KEY-----";
+    const existingAgent = {
+      id: "11111111-1111-4111-8111-111111111112",
+      companyId: "company-1",
+      name: "CEO",
+      urlKey: "ceo",
+      role: "ceo",
+      title: null,
+      icon: null,
+      status: "idle",
+      reportsTo: null,
+      capabilities: null,
+      adapterType: "openclaw_gateway",
+      adapterConfig: {
+        url: "ws://citro-openclaw.internal:18789",
+        disableDeviceAuth: false,
+        devicePrivateKeyPem: existingDevicePrivateKeyPem,
+        authTokenRef: { type: "secret_ref", secretId: "secret-1", version: "latest" },
+      },
+      runtimeConfig: {},
+      budgetMonthlyCents: 0,
+      spentMonthlyCents: 0,
+      pauseReason: null,
+      pausedAt: null,
+      permissions: { canCreateAgents: false },
+      lastHeartbeatAt: null,
+      metadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    mockAgentService.getById.mockResolvedValue(existingAgent);
+
+    const app = await createApp();
+    const res = await request(app)
+      .patch("/api/agents/11111111-1111-4111-8111-111111111112")
+      .send({
+        adapterConfig: {
+          disableDeviceAuth: false,
+        },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const patch = mockAgentService.update.mock.calls[0]?.[1] as
+      | Record<string, unknown>
+      | undefined;
+    const adapterConfig = patch?.adapterConfig as Record<string, unknown> | undefined;
+    expect(adapterConfig?.disableDeviceAuth).toBe(false);
+    expect(adapterConfig?.devicePrivateKeyPem).toBe(existingDevicePrivateKeyPem);
+  });
+
   it("persists normalized OpenClaw connection status on agent metadata", async () => {
     const { registerServerAdapter } = await import("../adapters/index.js");
     registerServerAdapter({
