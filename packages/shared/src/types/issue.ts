@@ -319,6 +319,9 @@ export interface IssueGraphDeliverableNode {
   id: string;
   companyId: string;
   issueId: string;
+  originatingIssueId: string;
+  originatingIssueIdentifier: string | null;
+  originatingIssueTitle: string;
   deliverableKind: IssueGraphDeliverableKind;
   title: string;
   audience: DeliverableAudience;

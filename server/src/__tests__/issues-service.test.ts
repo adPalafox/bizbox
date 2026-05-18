@@ -1150,6 +1150,24 @@ describeEmbeddedPostgres("issueService.list participantAgentId", () => {
     expect(graphByIdentifier?.deliverables.map((deliverable) => deliverable.deliverableKind)).toEqual(
       expect.arrayContaining(["artifact", "document"]),
     );
+    expect(graphByIdentifier?.deliverables).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: artifactId,
+          issueId: childIssueId,
+          originatingIssueId: rootIssueId,
+          originatingIssueIdentifier: "PAP-1",
+          originatingIssueTitle: "Root issue",
+        }),
+        expect.objectContaining({
+          id: issueDocumentId,
+          issueId: grandchildIssueId,
+          originatingIssueId: rootIssueId,
+          originatingIssueIdentifier: "PAP-1",
+          originatingIssueTitle: "Root issue",
+        }),
+      ]),
+    );
     expect(graphByIdentifier?.edges.some((edge) => edge.kind === "issue-deliverable" && edge.deliverableId === artifactId)).toBe(true);
     expect(graphByIdentifier?.edges.some((edge) => edge.kind === "issue-deliverable" && edge.deliverableId === issueDocumentId)).toBe(true);
   });

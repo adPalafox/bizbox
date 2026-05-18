@@ -89,6 +89,16 @@ function sampleGraph() {
         icon: null,
         status: "active",
       },
+      {
+        kind: "agent",
+        id: "agent-2",
+        companyId: "company-1",
+        name: "Beacon",
+        urlKey: "beacon",
+        role: "reviewer",
+        icon: null,
+        status: "active",
+      },
     ],
     deliverables: [
       {
@@ -96,6 +106,9 @@ function sampleGraph() {
         id: "deliverable-1",
         companyId: "company-1",
         issueId: "issue-child",
+        originatingIssueId: "issue-root",
+        originatingIssueIdentifier: "PAP-1",
+        originatingIssueTitle: "Root issue",
         deliverableKind: "document",
         title: "Execution plan",
         audience: "human",
@@ -106,6 +119,26 @@ function sampleGraph() {
         artifactByteSize: null,
         artifactOriginalFilename: null,
         documentKey: "plan",
+        documentFormat: "markdown",
+      },
+      {
+        kind: "deliverable",
+        id: "deliverable-root",
+        companyId: "company-1",
+        issueId: "issue-root",
+        originatingIssueId: "issue-root",
+        originatingIssueIdentifier: "PAP-1",
+        originatingIssueTitle: "Root issue",
+        deliverableKind: "document",
+        title: "CEO Strategic Brief",
+        audience: "human",
+        createdAt: "2026-05-18T00:00:00.000Z",
+        updatedAt: "2026-05-18T00:00:00.000Z",
+        artifactContentPath: null,
+        artifactContentType: null,
+        artifactByteSize: null,
+        artifactOriginalFilename: null,
+        documentKey: "brief",
         documentFormat: "markdown",
       },
     ],
@@ -139,6 +172,16 @@ function sampleGraph() {
         participationRole: "assigned",
       },
       {
+        id: "participant:child-agent",
+        kind: "participant-agent",
+        fromId: "issue:issue-child",
+        toId: "agent:agent-2",
+        issueId: "issue-child",
+        agentId: "agent-2",
+        deliverableId: null,
+        participationRole: "participant",
+      },
+      {
         id: "deliverable:child-doc",
         kind: "issue-deliverable",
         fromId: "issue:issue-child",
@@ -146,6 +189,15 @@ function sampleGraph() {
         issueId: "issue-child",
         agentId: null,
         deliverableId: "deliverable-1",
+      },
+      {
+        id: "deliverable:root-doc",
+        kind: "issue-deliverable",
+        fromId: "issue:issue-root",
+        toId: "deliverable:deliverable-root",
+        issueId: "issue-root",
+        agentId: null,
+        deliverableId: "deliverable-root",
       },
     ],
   };
@@ -168,7 +220,7 @@ describe("IssueGraph page", () => {
     vi.clearAllMocks();
   });
 
-  it("renders issue, agent, and deliverable nodes with blocker edges", async () => {
+  it("renders a rooted pipeline while preserving the selected issue as the operator entry point", async () => {
     getGraphMock.mockResolvedValue(sampleGraph());
 
     const root = createRoot(container);
@@ -190,15 +242,30 @@ describe("IssueGraph page", () => {
     expect(container.textContent).toContain("Issue Pipeline");
     expect(container.textContent).toContain("Root issue");
     expect(container.textContent).toContain("Child issue");
+    expect(container.textContent).toContain("Viewing PAP-2");
+    expect(container.textContent).toContain("within PAP-1");
+    expect(container.textContent).toContain("in progress");
     expect(container.textContent).toContain("Astro");
+    expect(container.textContent).toContain("Beacon");
+    expect(container.textContent).toContain("Assigned");
+    expect(container.textContent).toContain("Worked");
     expect(container.textContent).toContain("Execution plan");
+    expect(container.textContent).toContain("CEO Strategic Brief");
+    expect(container.textContent).toContain("Requested by PAP-1");
     expect(container.querySelectorAll('[data-node-kind="issue"]').length).toBe(2);
-    expect(container.querySelectorAll('[data-node-kind="agent"]').length).toBe(1);
-    expect(container.querySelectorAll('[data-node-kind="deliverable"]').length).toBe(1);
+    expect(container.querySelectorAll('[data-node-kind="agent"]').length).toBe(2);
+    expect(container.querySelectorAll('[data-node-kind="deliverable"]').length).toBe(2);
     expect(container.querySelectorAll('[data-edge-kind="blocker"]').length).toBe(1);
+    expect(container.querySelector('[data-node-kind="issue"][data-selected="true"]')?.textContent).toContain("Child issue");
+    expect(container.textContent?.match(/Requested by PAP-1/g)?.length).toBe(1);
     const edgePaths = Array.from(container.querySelectorAll("path[data-edge-kind]"));
     expect(edgePaths.every((path) => !(path.getAttribute("d") ?? "").includes("M 0 0"))).toBe(true);
     expect(setBreadcrumbsMock).toHaveBeenCalled();
+    expect(setBreadcrumbsMock).toHaveBeenCalledWith([
+      { label: "Issues", href: "/issues" },
+      { label: "PAP-2", href: "/issues/PAP-2" },
+      { label: "Pipeline" },
+    ]);
 
     await act(async () => {
       const childButton = Array.from(container.querySelectorAll('button')).find((button) =>
@@ -215,6 +282,14 @@ describe("IssueGraph page", () => {
       agentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(navigateMock).toHaveBeenCalledWith("/agents/astro");
+
+    await act(async () => {
+      const participantButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes("Beacon"),
+      );
+      participantButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(navigateMock).toHaveBeenCalledWith("/agents/beacon");
 
     const deliverableLink = Array.from(container.querySelectorAll('a')).find((anchor) =>
       anchor.textContent?.includes("Execution plan"),

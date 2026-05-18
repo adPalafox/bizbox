@@ -271,6 +271,10 @@ export function IssueGraph() {
     () => data?.issues.find((issue) => issue.id === data.rootIssueId) ?? null,
     [data],
   );
+  const selectedIssue = useMemo(
+    () => data?.issues.find((issue) => issue.id === issueId || issue.identifier === issueId) ?? null,
+    [data, issueId],
+  );
   const agentMap = useMemo(
     () => new Map(data?.agents.map((agent) => [agent.id, agent]) ?? []),
     [data],
@@ -278,15 +282,15 @@ export function IssueGraph() {
 
   useEffect(() => {
     setBreadcrumbs(
-      rootIssue
+      selectedIssue
         ? [
             { label: "Issues", href: "/issues" },
-            { label: rootIssue.identifier ?? rootIssue.title, href: `/issues/${rootIssue.identifier ?? rootIssue.id}` },
+            { label: selectedIssue.identifier ?? selectedIssue.title, href: `/issues/${selectedIssue.identifier ?? selectedIssue.id}` },
             { label: "Pipeline" },
           ]
         : [{ label: "Issues", href: "/issues" }, { label: "Pipeline" }],
     );
-  }, [rootIssue, setBreadcrumbs]);
+  }, [selectedIssue, setBreadcrumbs]);
 
   useEffect(() => {
     if (!layout || !containerRef.current) return;
@@ -326,8 +330,12 @@ export function IssueGraph() {
   if (isLoading) return <PageSkeleton variant="org-chart" />;
   if (error) return <p className="text-sm text-destructive">{(error as Error).message}</p>;
   if (!data || !layout || !rootIssue) {
-    return <EmptyState icon={Network} message="Issue graph unavailable." />;
+    return <EmptyState icon={Network} message="Issue pipeline unavailable." />;
   }
+
+  const selectedIssueLabel = selectedIssue?.identifier ?? selectedIssue?.title ?? issueId ?? rootIssue.identifier ?? rootIssue.id;
+  const rootIssueLabel = rootIssue.identifier ?? rootIssue.id;
+  const headlineStatus = selectedIssue?.status ?? rootIssue.status;
 
   return (
     <div className="space-y-4">
@@ -336,10 +344,10 @@ export function IssueGraph() {
           <div className="flex items-center gap-2">
             <Network className="h-4 w-4 text-muted-foreground" />
             <h1 className="text-xl font-bold">Issue Pipeline</h1>
-            <StatusBadge status={rootIssue.status} />
+            <StatusBadge status={headlineStatus} />
           </div>
           <p className="text-sm text-muted-foreground">
-            Rooted at <span className="font-mono">{rootIssue.identifier ?? rootIssue.id}</span> and expanded across all downstream issues.
+            Viewing <span className="font-mono">{selectedIssueLabel}</span> within <span className="font-mono">{rootIssueLabel}</span> and expanded across all downstream issues.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -446,16 +454,21 @@ export function IssueGraph() {
           {data.issues.map((issue) => {
             const rect = layout.issueRects.get(issue.id);
             if (!rect) return null;
+            const isSelectedIssue = issue.id === selectedIssue?.id;
             const roles = layout.issueAgentRoles.get(issue.id) ?? { assigned: [], participant: [] };
             const deliverables = layout.issueDeliverables.get(issue.id) ?? [];
             return (
               <button
                 key={issue.id}
                 type="button"
-                className="absolute rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
+                className={cn(
+                  "absolute rounded-xl border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40",
+                  isSelectedIssue ? "border-primary shadow-md ring-2 ring-primary/30" : "border-border",
+                )}
                 style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
                 onClick={() => navigate(`/issues/${issue.identifier ?? issue.id}`)}
                 data-node-kind="issue"
+                data-selected={isSelectedIssue ? "true" : "false"}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -525,9 +538,12 @@ export function IssueGraph() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-foreground">{deliverable.title}</span>
-                  <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {deliverable.deliverableKind}
-                  </span>
+                  <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{deliverable.deliverableKind}</span>
+                  {deliverable.originatingIssueId !== deliverable.issueId ? (
+                    <span className="block truncate text-[10px] text-muted-foreground">
+                      Requested by {deliverable.originatingIssueIdentifier ?? deliverable.originatingIssueTitle}
+                    </span>
+                  ) : null}
                 </span>
                 <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
               </Link>
