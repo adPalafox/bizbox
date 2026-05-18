@@ -194,7 +194,7 @@ function nonEmptyLabel(value: string | null | undefined): string | null {
 }
 
 function issueFromRelationSummary(issue: IssueRelationIssueSummary, companyId: string): Issue {
-  const now = new Date(0);
+  const now = new Date();
   return {
     id: issue.id,
     companyId,
