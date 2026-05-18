@@ -2411,6 +2411,11 @@ export function agentRoutes(db: Db) {
         requestedAdapterType,
         rawEffectiveAdapterConfig,
       );
+      effectiveAdapterConfig = await ensureGatewayDeviceKey(
+        existing.companyId,
+        requestedAdapterType,
+        effectiveAdapterConfig,
+      );
       if (requestedAdapterType === "openclaw_gateway") {
         effectiveAdapterConfig = await persistOpenClawGatewayAuthToken({
           companyId: existing.companyId,
