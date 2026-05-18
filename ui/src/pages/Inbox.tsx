@@ -2337,6 +2337,7 @@ export function Inbox() {
               {(() => {
                 const renderInboxIssue = ({
                   issue,
+                  issuePrefetch,
                   depth,
                   selected,
                   hasChildren = false,
@@ -2346,6 +2347,7 @@ export function Inbox() {
                   allowArchive = canArchiveFromTab,
                 }: {
                   issue: Issue;
+                  issuePrefetch?: Issue | null;
                   depth: number;
                   selected: boolean;
                   hasChildren?: boolean;
@@ -2365,6 +2367,7 @@ export function Inbox() {
                     <IssueRow
                       key={`issue:${issue.id}`}
                       issue={issue}
+                      issuePrefetch={issuePrefetch}
                       issueLinkState={issueLinkState}
                       selected={selected}
                       className={
@@ -2714,10 +2717,14 @@ export function Inbox() {
                         nestedIssue: Issue,
                         rowKey: string,
                         selectedNavIndex: number,
+                        options?: {
+                          issuePrefetch?: Issue | null;
+                        },
                       ) => {
                         const isNestedSelected = selectedIndex === selectedNavIndex;
                         const nestedRow = renderInboxIssue({
                           issue: nestedIssue,
+                          issuePrefetch: options?.issuePrefetch,
                           depth: 1,
                           selected: isNestedSelected,
                           allowArchive: canArchiveIssue,
@@ -2764,7 +2771,12 @@ export function Inbox() {
                         for (const relatedIssue of outboundReferences) {
                           const rowKey = `outbound:${issue.id}:${relatedIssue.id}`;
                           const relatedNavIdx = childFlatIndex.get(rowKey) ?? -1;
-                          elements.push(renderNestedIssue(issueFromRelationSummary(relatedIssue), rowKey, relatedNavIdx));
+                          elements.push(renderNestedIssue(
+                            issueFromRelationSummary(relatedIssue),
+                            rowKey,
+                            relatedNavIdx,
+                            { issuePrefetch: null },
+                          ));
                         }
                       }
 
@@ -2782,7 +2794,12 @@ export function Inbox() {
                         for (const relatedIssue of inboundReferences) {
                           const rowKey = `inbound:${issue.id}:${relatedIssue.id}`;
                           const relatedNavIdx = childFlatIndex.get(rowKey) ?? -1;
-                          elements.push(renderNestedIssue(issueFromRelationSummary(relatedIssue), rowKey, relatedNavIdx));
+                          elements.push(renderNestedIssue(
+                            issueFromRelationSummary(relatedIssue),
+                            rowKey,
+                            relatedNavIdx,
+                            { issuePrefetch: null },
+                          ));
                         }
                       }
                     }

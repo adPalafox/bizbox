@@ -690,6 +690,34 @@ describe("inbox helpers", () => {
     expect(nestedRows?.inbound.map((issue) => issue.id)).toEqual([inboundOnly.id]);
   });
 
+  it("only renders related-work rows when the related issue independently belongs to the current section", () => {
+    const parentIssue = makeIssue("parent-filtered-related", true);
+    const visibleRelated = makeIssue("visible-related", true);
+    const hiddenRelated = makeRelatedIssueSummary("hidden-related");
+
+    parentIssue.relatedWork = {
+      outbound: [
+        { issue: makeRelatedIssueSummary(visibleRelated.id), mentionCount: 1, sources: [] },
+        { issue: hiddenRelated, mentionCount: 1, sources: [] },
+      ],
+      inbound: [],
+    };
+
+    const [grouped] = buildGroupedInboxSections(
+      [
+        { kind: "issue", timestamp: 5, issue: parentIssue },
+        { kind: "issue", timestamp: 4, issue: visibleRelated },
+      ],
+      "none",
+      {},
+      { nestingEnabled: true },
+    );
+
+    const nestedRows = grouped?.nestedByIssueId.get(parentIssue.id);
+    expect(nestedRows?.outbound.map((issue) => issue.id)).toEqual([visibleRelated.id]);
+    expect(nestedRows?.outbound.map((issue) => issue.id)).not.toContain(hiddenRelated.id);
+  });
+
   it("adds outbound and inbound reference rows to keyboard navigation only when the parent is expanded", () => {
     const parentIssue = makeIssue("parent-related-nav", true);
     const outboundIssue = makeRelatedIssueSummary("outbound-nav");
@@ -730,6 +758,31 @@ describe("inbox helpers", () => {
     );
 
     expect(collapsedEntries.map((entry) => entry.type)).toEqual(["top"]);
+  });
+
+  it("treats each visible nested related-work row as its own keyboard target even for the same issue id", () => {
+    const parentIssue = makeIssue("parent-related-duplicates", true);
+    const repeatedRelated = makeRelatedIssueSummary("shared-related");
+
+    const entries = buildInboxKeyboardNavEntries(
+      [{
+        key: "workspace:default",
+        displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [],
+          outbound: [repeatedRelated],
+          inbound: [repeatedRelated],
+        }]]),
+      }],
+      new Set(),
+      new Set(),
+    );
+
+    expect(entries.map((entry) => entry.type === "child" ? entry.rowKey : entry.type)).toEqual([
+      "top",
+      `outbound:${parentIssue.id}:${repeatedRelated.id}`,
+      `inbound:${parentIssue.id}:${repeatedRelated.id}`,
+    ]);
   });
 
   it("emits a group nav entry for labeled groups and omits children when the group is collapsed", () => {
