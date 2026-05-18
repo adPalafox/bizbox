@@ -1092,7 +1092,7 @@ export function issueService(db: Db) {
               .where(and(eq(agents.companyId, rootRow.companyId), inArray(agents.id, assigneeAgentIds)))
           : Promise.resolve([]),
         db
-          .select({
+          .selectDistinct({
             issueId: issueComments.issueId,
             agentId: issueComments.authorAgentId,
           })
@@ -1105,7 +1105,7 @@ export function issueService(db: Db) {
             ),
           ),
         db
-          .select({
+          .selectDistinct({
             issueId: activityLog.entityId,
             agentId: activityLog.agentId,
           })

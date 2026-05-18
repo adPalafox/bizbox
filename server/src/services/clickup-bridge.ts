@@ -17,29 +17,38 @@ const MIN_POLL_CLAIM_MS = 45_000;
 const STALE_OUTBOUND_PROCESSING_MS = 2 * 60 * 1000;
 const BRIDGE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
-const buildClickUpContextBody =
-  "buildClickUpContextBody" in clickUpAgentRefServerPackage &&
-  typeof clickUpAgentRefServerPackage.buildClickUpContextBody === "function"
-    ? clickUpAgentRefServerPackage.buildClickUpContextBody
-    : "default" in clickUpAgentRefServerPackage &&
-        clickUpAgentRefServerPackage.default &&
-        typeof clickUpAgentRefServerPackage.default === "object" &&
-        "buildClickUpContextBody" in clickUpAgentRefServerPackage.default &&
-        typeof clickUpAgentRefServerPackage.default.buildClickUpContextBody === "function"
-      ? clickUpAgentRefServerPackage.default.buildClickUpContextBody
-      : null;
+function resolveRequiredServerExport<T extends (...args: never[]) => unknown>(
+  exportName: string,
+): T {
+  const direct =
+    exportName in clickUpAgentRefServerPackage
+      ? clickUpAgentRefServerPackage[exportName as keyof typeof clickUpAgentRefServerPackage]
+      : undefined;
+  if (typeof direct === "function") {
+    return direct as unknown as T;
+  }
+  const fallback =
+    "default" in clickUpAgentRefServerPackage &&
+    clickUpAgentRefServerPackage.default &&
+    typeof clickUpAgentRefServerPackage.default === "object" &&
+    exportName in clickUpAgentRefServerPackage.default
+      ? clickUpAgentRefServerPackage.default[
+          exportName as keyof typeof clickUpAgentRefServerPackage.default
+        ]
+      : undefined;
+  if (typeof fallback === "function") {
+    return fallback as unknown as T;
+  }
+  throw new Error(`clickup_agent_ref server ${exportName} export is unavailable`);
+}
 
-const buildCommentPayload =
-  "buildCommentPayload" in clickUpAgentRefServerPackage &&
-  typeof clickUpAgentRefServerPackage.buildCommentPayload === "function"
-    ? clickUpAgentRefServerPackage.buildCommentPayload
-    : "default" in clickUpAgentRefServerPackage &&
-        clickUpAgentRefServerPackage.default &&
-        typeof clickUpAgentRefServerPackage.default === "object" &&
-        "buildCommentPayload" in clickUpAgentRefServerPackage.default &&
-        typeof clickUpAgentRefServerPackage.default.buildCommentPayload === "function"
-      ? clickUpAgentRefServerPackage.default.buildCommentPayload
-      : null;
+const buildClickUpContextBody = resolveRequiredServerExport<
+  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
+>("buildClickUpContextBody");
+
+const buildCommentPayload = resolveRequiredServerExport<
+  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
+>("buildCommentPayload");
 
 type ClickUpCommentPayloadConfig = Parameters<
   typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
@@ -159,9 +168,6 @@ function buildBridgeCommentPayload(
   body: string,
   cfg: ReturnType<typeof resolveConfig>,
 ): Record<string, unknown> {
-  if (!buildCommentPayload) {
-    throw new Error("clickup_agent_ref server buildCommentPayload export is unavailable");
-  }
   const adapterConfig: ClickUpCommentPayloadConfig = {
     apiBaseUrl: cfg.apiBaseUrl,
     authToken: cfg.authToken,
@@ -239,9 +245,6 @@ function buildClickUpContextBodyStrict(
   context: Record<string, unknown>,
   config: ClickUpContextBodyConfig,
 ): string {
-  if (!buildClickUpContextBody) {
-    throw new Error("clickup_agent_ref server buildClickUpContextBody export is unavailable");
-  }
   return buildClickUpContextBody(context, config);
 }
 
