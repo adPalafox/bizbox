@@ -197,7 +197,7 @@ function issueFromRelationSummary(issue: IssueRelationIssueSummary): Issue {
   const now = new Date(0);
   return {
     id: issue.id,
-    companyId: "",
+    companyId: issue.id,
     projectId: null,
     projectWorkspaceId: null,
     goalId: null,
