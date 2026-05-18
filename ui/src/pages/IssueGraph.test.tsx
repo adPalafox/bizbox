@@ -9,6 +9,7 @@ import { IssueGraph } from "./IssueGraph";
 const getGraphMock = vi.hoisted(() => vi.fn());
 const setBreadcrumbsMock = vi.hoisted(() => vi.fn());
 const navigateMock = vi.hoisted(() => vi.fn());
+let currentIssueId = "PAP-2";
 
 vi.mock("../api/issues", () => ({
   issuesApi: {
@@ -23,7 +24,7 @@ vi.mock("@/context/BreadcrumbContext", () => ({
 vi.mock("@/lib/router", () => ({
   Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => <a href={to} {...props}>{children}</a>,
   useNavigate: () => navigateMock,
-  useParams: () => ({ issueId: "PAP-2" }),
+  useParams: () => ({ issueId: currentIssueId }),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -208,6 +209,7 @@ describe("IssueGraph page", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    currentIssueId = "PAP-2";
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -295,5 +297,29 @@ describe("IssueGraph page", () => {
       anchor.textContent?.includes("Execution plan"),
     );
     expect(deliverableLink?.getAttribute("href")).toBe("/issues/PAP-2#document-plan");
+  });
+
+  it("omits redundant root context copy when the selected issue is the root", async () => {
+    currentIssueId = "PAP-1";
+    getGraphMock.mockResolvedValue(sampleGraph());
+
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <IssueGraph />
+        </QueryClientProvider>,
+      );
+    });
+
+    await flushReact();
+    await flushReact();
+
+    expect(container.textContent).toContain("Viewing PAP-1");
+    expect(container.textContent).not.toContain("within PAP-1");
   });
 });

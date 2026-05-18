@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type TouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { type IssueGraphDeliverableNode, type IssueGraphResponse } from "@paperclipai/shared";
 import { Activity, ArrowRight, Boxes, Download, FileText, GitBranch, Network, ZoomIn, ZoomOut } from "lucide-react";
@@ -97,13 +97,15 @@ function buildTreeChildren(graph: IssueGraphResponse) {
 
 function buildDepthMap(rootIssueId: string, childMap: Map<string, string[]>) {
   const depthMap = new Map<string, number>();
-  const walk = (issueId: string, depth: number) => {
+  const walk = (issueId: string, depth: number, visited: Set<string>) => {
+    if (visited.has(issueId)) return;
+    visited.add(issueId);
     depthMap.set(issueId, depth);
     for (const childId of childMap.get(issueId) ?? []) {
-      walk(childId, depth + 1);
+      walk(childId, depth + 1, visited);
     }
   };
-  walk(rootIssueId, 0);
+  walk(rootIssueId, 0, new Set<string>());
   return depthMap;
 }
 
@@ -327,6 +329,21 @@ export function IssueGraph() {
     dragRef.current.active = false;
   }, []);
 
+  const onTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    startDrag(touch.clientX, touch.clientY);
+  }, [startDrag]);
+
+  const onTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    if (!dragRef.current.active || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    event.preventDefault();
+    onPointerMove(touch.clientX, touch.clientY);
+  }, [onPointerMove]);
+
   if (isLoading) return <PageSkeleton variant="org-chart" />;
   if (error) return <p className="text-sm text-destructive">{(error as Error).message}</p>;
   if (!data || !layout || !rootIssue) {
@@ -347,7 +364,11 @@ export function IssueGraph() {
             <StatusBadge status={headlineStatus} />
           </div>
           <p className="text-sm text-muted-foreground">
-            Viewing <span className="font-mono">{selectedIssueLabel}</span> within <span className="font-mono">{rootIssueLabel}</span> and expanded across all downstream issues.
+            Viewing <span className="font-mono">{selectedIssueLabel}</span>
+            {selectedIssue?.id !== rootIssue.id && (
+              <> within <span className="font-mono">{rootIssueLabel}</span></>
+            )}{" "}
+            and expanded across all downstream issues.
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -380,10 +401,15 @@ export function IssueGraph() {
       <div
         ref={containerRef}
         className="relative h-[70vh] overflow-hidden rounded-xl border border-border bg-muted/20"
+        style={{ touchAction: "none" }}
         onMouseDown={(event) => startDrag(event.clientX, event.clientY)}
         onMouseMove={(event) => onPointerMove(event.clientX, event.clientY)}
         onMouseUp={stopDrag}
         onMouseLeave={stopDrag}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={stopDrag}
+        onTouchCancel={stopDrag}
       >
         <div
           className="absolute left-0 top-0"
