@@ -193,11 +193,11 @@ function nonEmptyLabel(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-function issueFromRelationSummary(issue: IssueRelationIssueSummary): Issue {
+function issueFromRelationSummary(issue: IssueRelationIssueSummary, companyId: string): Issue {
   const now = new Date(0);
   return {
     id: issue.id,
-    companyId: issue.id,
+    companyId,
     projectId: null,
     projectWorkspaceId: null,
     goalId: null,
@@ -1908,8 +1908,12 @@ export function Inbox() {
         const entry = navItems[idx];
         if (!entry) return {};
         if (entry.type === "child") {
+          if (!selectedCompanyId) return {};
           return {
-            issue: "companyId" in entry.issue ? entry.issue : issueFromRelationSummary(entry.issue),
+            issue:
+              "companyId" in entry.issue
+                ? entry.issue
+                : issueFromRelationSummary(entry.issue, selectedCompanyId),
           };
         }
         if (entry.type === "top") return { item: entry.item };
@@ -2774,7 +2778,7 @@ export function Inbox() {
                           const rowKey = `outbound:${issue.id}:${relatedIssue.id}`;
                           const relatedNavIdx = childFlatIndex.get(rowKey) ?? -1;
                           elements.push(renderNestedIssue(
-                            issueFromRelationSummary(relatedIssue),
+                            issueFromRelationSummary(relatedIssue, issue.companyId),
                             rowKey,
                             relatedNavIdx,
                             { issuePrefetch: null, allowArchive: false },
@@ -2797,7 +2801,7 @@ export function Inbox() {
                           const rowKey = `inbound:${issue.id}:${relatedIssue.id}`;
                           const relatedNavIdx = childFlatIndex.get(rowKey) ?? -1;
                           elements.push(renderNestedIssue(
-                            issueFromRelationSummary(relatedIssue),
+                            issueFromRelationSummary(relatedIssue, issue.companyId),
                             rowKey,
                             relatedNavIdx,
                             { issuePrefetch: null, allowArchive: false },
