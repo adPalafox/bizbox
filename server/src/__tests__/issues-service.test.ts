@@ -98,22 +98,18 @@ if (!embeddedPostgresSupport.supported) {
 describeEmbeddedPostgres("issueService.list participantAgentId", () => {
   let db!: ReturnType<typeof createDb>;
   let svc!: ReturnType<typeof issueService>;
-  let refs!: ReturnType<typeof issueReferenceService>;
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
 
   beforeAll(async () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issues-service-");
     db = createDb(tempDb.connectionString);
     svc = issueService(db);
-    refs = issueReferenceService(db);
     await ensureIssueRelationsTable(db);
-    await ensureIssueReferenceMentionsTable(db);
   }, 20_000);
 
   afterEach(async () => {
     vi.clearAllMocks();
     await db.delete(issueComments);
-    await db.delete(issueReferenceMentions);
     await db.delete(issueRelations);
     await db.delete(issueInboxArchives);
     await db.delete(activityLog);
@@ -2169,6 +2165,10 @@ describeEmbeddedPostgres("issueService.clearExecutionRunIfTerminal", () => {
 
     expect(sourceIssue?.relatedWork?.outbound.map((item) => item.issue.identifier)).toEqual(["PAP-2"]);
     expect(sourceIssue?.referencedIssueIdentifiers).toEqual(["PAP-2"]);
-    expect(targetIssue?.relatedWork?.inbound.map((item) => item.issue.identifier)).toEqual(["PAP-1", "PAP-3"]);
+    expect(
+      [...(targetIssue?.relatedWork?.inbound ?? [])]
+        .sort((a, b) => (a.issue.identifier ?? "").localeCompare(b.issue.identifier ?? ""))
+        .map((item) => item.issue.identifier),
+    ).toEqual(["PAP-1", "PAP-3"]);
   });
 });
