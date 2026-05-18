@@ -2719,15 +2719,17 @@ export function Inbox() {
                         selectedNavIndex: number,
                         options?: {
                           issuePrefetch?: Issue | null;
+                          allowArchive?: boolean;
                         },
                       ) => {
                         const isNestedSelected = selectedIndex === selectedNavIndex;
+                        const effectiveAllowArchive = options?.allowArchive ?? canArchiveIssue;
                         const nestedRow = renderInboxIssue({
                           issue: nestedIssue,
                           issuePrefetch: options?.issuePrefetch,
                           depth: 1,
                           selected: isNestedSelected,
-                          allowArchive: canArchiveIssue,
+                          allowArchive: effectiveAllowArchive,
                         });
                         const isNestedArchiving = archivingIssueIds.has(nestedIssue.id);
                         return (
@@ -2737,7 +2739,7 @@ export function Inbox() {
                             className="relative"
                             onClick={() => setSelectedIndex(selectedNavIndex)}
                           >
-                            {canArchiveIssue ? (
+                            {effectiveAllowArchive ? (
                               <SwipeToArchive
                                 key={`issue:${nestedIssue.id}`}
                                 selected={isNestedSelected}
@@ -2775,7 +2777,7 @@ export function Inbox() {
                             issueFromRelationSummary(relatedIssue),
                             rowKey,
                             relatedNavIdx,
-                            { issuePrefetch: null },
+                            { issuePrefetch: null, allowArchive: false },
                           ));
                         }
                       }
@@ -2798,7 +2800,7 @@ export function Inbox() {
                             issueFromRelationSummary(relatedIssue),
                             rowKey,
                             relatedNavIdx,
-                            { issuePrefetch: null },
+                            { issuePrefetch: null, allowArchive: false },
                           ));
                         }
                       }

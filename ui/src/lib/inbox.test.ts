@@ -718,6 +718,34 @@ describe("inbox helpers", () => {
     expect(nestedRows?.outbound.map((issue) => issue.id)).not.toContain(hiddenRelated.id);
   });
 
+  it("never renders a child issue as related work under a different parent in the same section", () => {
+    const parentIssue = makeIssue("parent-a", true);
+    const otherParentIssue = makeIssue("parent-b", true);
+    const childIssue = makeIssue("shared-child", true);
+    childIssue.parentId = otherParentIssue.id;
+
+    parentIssue.relatedWork = {
+      outbound: [
+        { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
+      ],
+      inbound: [],
+    };
+
+    const [grouped] = buildGroupedInboxSections(
+      [
+        { kind: "issue", timestamp: 6, issue: parentIssue },
+        { kind: "issue", timestamp: 5, issue: otherParentIssue },
+        { kind: "issue", timestamp: 4, issue: childIssue },
+      ],
+      "none",
+      {},
+      { nestingEnabled: true },
+    );
+
+    expect(grouped?.nestedByIssueId.get(parentIssue.id)?.outbound).toEqual([]);
+    expect(grouped?.nestedByIssueId.get(otherParentIssue.id)?.children.map((issue) => issue.id)).toEqual([childIssue.id]);
+  });
+
   it("adds outbound and inbound reference rows to keyboard navigation only when the parent is expanded", () => {
     const parentIssue = makeIssue("parent-related-nav", true);
     const outboundIssue = makeRelatedIssueSummary("outbound-nav");
