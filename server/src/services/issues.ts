@@ -1544,17 +1544,19 @@ export function issueService(db: Db) {
       }
 
       const issueIds = withRuns.map((row) => row.id);
-      const relatedWorkByIssueId = filters?.includeRelatedWork
-        ? await issueReferences.listIssueReferenceSummaries(issueIds, db)
-        : null;
-      const [statsRows, readRows, lastActivityRows] = await Promise.all([
-        contextUserId
-          ? userCommentStatsForIssues(db, companyId, contextUserId, issueIds)
-          : Promise.resolve([]),
-        contextUserId
-          ? userReadStatsForIssues(db, companyId, contextUserId, issueIds)
-          : Promise.resolve([]),
-        lastActivityStatsForIssues(db, companyId, issueIds),
+      const [relatedWorkByIssueId, [statsRows, readRows, lastActivityRows]] = await Promise.all([
+        filters?.includeRelatedWork
+          ? issueReferences.listIssueReferenceSummaries(issueIds, db)
+          : Promise.resolve(null),
+        Promise.all([
+          contextUserId
+            ? userCommentStatsForIssues(db, companyId, contextUserId, issueIds)
+            : Promise.resolve([]),
+          contextUserId
+            ? userReadStatsForIssues(db, companyId, contextUserId, issueIds)
+            : Promise.resolve([]),
+          lastActivityStatsForIssues(db, companyId, issueIds),
+        ]),
       ]);
       const statsByIssueId = new Map(statsRows.map((row) => [row.issueId, row]));
       const lastActivityByIssueId = new Map(lastActivityRows.map((row) => [row.issueId, row]));
