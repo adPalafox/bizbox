@@ -1979,16 +1979,21 @@ describeEmbeddedPostgres("issueService.findMentionedProjectIds", () => {
 describeEmbeddedPostgres("issueService.clearExecutionRunIfTerminal", () => {
   let db!: ReturnType<typeof createDb>;
   let svc!: ReturnType<typeof issueService>;
+  let refs!: ReturnType<typeof issueReferenceService>;
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
 
   beforeAll(async () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issues-execution-lock-");
     db = createDb(tempDb.connectionString);
     svc = issueService(db);
+    refs = issueReferenceService(db);
+    await ensureIssueRelationsTable(db);
+    await ensureIssueReferenceMentionsTable(db);
   }, 20_000);
 
   afterEach(async () => {
     await db.delete(issueComments);
+    await db.delete(issueReferenceMentions);
     await db.delete(issueRelations);
     await db.delete(issueInboxArchives);
     await db.delete(activityLog);
