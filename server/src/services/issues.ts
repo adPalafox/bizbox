@@ -1010,29 +1010,54 @@ export function issueService(db: Db) {
   }
 
   async function listDescendantIssueRows(root: IssueRow): Promise<IssueRow[]> {
-    const rowsById = new Map<string, IssueRow>([[root.id, root]]);
-    let frontier = [root.id];
+    const rows = await db.execute<{ current_id: string; depth: number; has_cycle: boolean }>(sql`
+      WITH RECURSIVE descendants AS (
+        SELECT
+          i.id AS current_id,
+          ARRAY[i.id]::uuid[] AS visited_ids,
+          0 AS depth,
+          false AS has_cycle
+        FROM issues i
+        WHERE i.company_id = ${root.companyId}
+          AND i.id = ${root.id}
 
-    while (frontier.length > 0) {
-      const childRows = await db
-        .select()
-        .from(issues)
-        .where(
-          and(
-            eq(issues.companyId, root.companyId),
-            inArray(issues.parentId, frontier),
-          ),
-        );
-      const nextFrontier: string[] = [];
-      for (const child of childRows) {
-        if (rowsById.has(child.id)) continue;
-        rowsById.set(child.id, child);
-        nextFrontier.push(child.id);
-      }
-      frontier = nextFrontier;
+        UNION ALL
+
+        SELECT
+          child.id AS current_id,
+          descendants.visited_ids || child.id,
+          descendants.depth + 1,
+          child.id = ANY(descendants.visited_ids) AS has_cycle
+        FROM descendants
+        JOIN issues child
+          ON child.company_id = ${root.companyId}
+         AND child.parent_id = descendants.current_id
+        WHERE NOT descendants.has_cycle
+      )
+      SELECT descendants.current_id, descendants.depth, descendants.has_cycle
+      FROM descendants
+      ORDER BY descendants.depth ASC
+    `);
+
+    const descendants = toRowArray<{ current_id: string; depth: number; has_cycle: boolean }>(rows);
+    if (descendants.some((row) => row.has_cycle)) {
+      throw conflict("Issue hierarchy contains a cycle");
     }
 
-    return [...rowsById.values()];
+    const descendantIds = [...new Set(descendants.map((row) => row.current_id))];
+    if (descendantIds.length === 0) return [root];
+
+    const issueRows = await db
+      .select()
+      .from(issues)
+      .where(
+        and(
+          eq(issues.companyId, root.companyId),
+          inArray(issues.id, descendantIds),
+        ),
+      );
+
+    return issueRows;
   }
 
   async function buildIssueGraph(
