@@ -2407,7 +2407,7 @@ export function Inbox() {
                           />
                         </>
                       }
-                      titleSuffix={hasChildren && !isExpanded && depth === 0 ? (
+                      titleSuffix={hasChildren && !isExpanded && depth === 0 && childCount > 0 ? (
                         <span className="ml-1.5 text-xs text-muted-foreground">
                           ({childCount} sub-task{childCount !== 1 ? "s" : ""})
                         </span>
