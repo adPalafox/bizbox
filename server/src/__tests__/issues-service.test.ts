@@ -7,14 +7,17 @@ import {
   agents,
   companies,
   createDb,
+  documents,
   executionWorkspaces,
   goals,
   heartbeatRuns,
   instanceSettings,
   issueComments,
+  issueDocuments,
   issueInboxArchives,
   issueReferenceMentions,
   issueRelations,
+  issueWorkProducts,
   issues,
   projectWorkspaces,
   projects,
@@ -110,6 +113,9 @@ describeEmbeddedPostgres("issueService.list participantAgentId", () => {
   afterEach(async () => {
     vi.clearAllMocks();
     await db.delete(issueComments);
+    await db.delete(issueDocuments);
+    await db.delete(issueWorkProducts);
+    await db.delete(documents);
     await db.delete(issueRelations);
     await db.delete(issueInboxArchives);
     await db.delete(activityLog);
@@ -940,6 +946,212 @@ describeEmbeddedPostgres("issueService.list participantAgentId", () => {
 
     expect(result?.description).toHaveLength(1200);
     expect(result?.description?.endsWith("—")).toBe(true);
+  });
+
+  it("builds a top-ancestor-scoped issue graph with blocker, participant, and deliverable edges", async () => {
+    const companyId = randomUUID();
+    const agentAssignedId = randomUUID();
+    const agentCommenterId = randomUUID();
+    const agentActivityId = randomUUID();
+    const rootIssueId = randomUUID();
+    const childIssueId = randomUUID();
+    const grandchildIssueId = randomUUID();
+    const siblingIssueId = randomUUID();
+    const outsideIssueId = randomUUID();
+    const artifactId = randomUUID();
+    const documentId = randomUUID();
+    const issueDocumentId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: "PAP",
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values([
+      {
+        id: agentAssignedId,
+        companyId,
+        name: "Assigned Agent",
+        role: "engineer",
+        status: "active",
+        adapterType: "codex_local",
+        adapterConfig: {},
+        runtimeConfig: {},
+        permissions: {},
+      },
+      {
+        id: agentCommenterId,
+        companyId,
+        name: "Comment Agent",
+        role: "reviewer",
+        status: "active",
+        adapterType: "codex_local",
+        adapterConfig: {},
+        runtimeConfig: {},
+        permissions: {},
+      },
+      {
+        id: agentActivityId,
+        companyId,
+        name: "Activity Agent",
+        role: "analyst",
+        status: "active",
+        adapterType: "codex_local",
+        adapterConfig: {},
+        runtimeConfig: {},
+        permissions: {},
+      },
+    ]);
+
+    await db.insert(issues).values([
+      {
+        id: rootIssueId,
+        companyId,
+        issueNumber: 1,
+        identifier: "PAP-1",
+        title: "Root issue",
+        status: "todo",
+        priority: "high",
+      },
+      {
+        id: childIssueId,
+        companyId,
+        parentId: rootIssueId,
+        issueNumber: 2,
+        identifier: "PAP-2",
+        title: "Child issue",
+        status: "in_progress",
+        priority: "medium",
+        assigneeAgentId: agentAssignedId,
+      },
+      {
+        id: grandchildIssueId,
+        companyId,
+        parentId: childIssueId,
+        issueNumber: 3,
+        identifier: "PAP-3",
+        title: "Grandchild issue",
+        status: "blocked",
+        priority: "medium",
+      },
+      {
+        id: siblingIssueId,
+        companyId,
+        parentId: rootIssueId,
+        issueNumber: 4,
+        identifier: "PAP-4",
+        title: "Sibling issue",
+        status: "done",
+        priority: "low",
+      },
+      {
+        id: outsideIssueId,
+        companyId,
+        issueNumber: 5,
+        identifier: "PAP-5",
+        title: "Outside issue",
+        status: "todo",
+        priority: "low",
+      },
+    ]);
+
+    await db.insert(issueComments).values({
+      companyId,
+      issueId: childIssueId,
+      authorAgentId: agentCommenterId,
+      body: "I reviewed this branch.",
+    });
+
+    await db.insert(activityLog).values({
+      companyId,
+      actorType: "agent",
+      actorId: agentActivityId,
+      action: "issue.updated",
+      entityType: "issue",
+      entityId: grandchildIssueId,
+      agentId: agentActivityId,
+      details: { touched: true },
+    });
+
+    await db.insert(issueRelations).values([
+      {
+        companyId,
+        issueId: siblingIssueId,
+        relatedIssueId: grandchildIssueId,
+        type: "blocks",
+      },
+      {
+        companyId,
+        issueId: outsideIssueId,
+        relatedIssueId: grandchildIssueId,
+        type: "blocks",
+      },
+    ]);
+
+    await db.insert(issueWorkProducts).values({
+      id: artifactId,
+      companyId,
+      issueId: childIssueId,
+      projectId: null,
+      type: "artifact",
+      provider: "paperclip",
+      title: "Final packet",
+      status: "ready_for_review",
+      audience: "human",
+      reviewState: "none",
+      healthStatus: "healthy",
+      isPrimary: true,
+      metadata: {
+        attachmentId: randomUUID(),
+        contentPath: "/api/attachments/artifact/content",
+        sourcePath: "deliverables/final-packet.md",
+        contentType: "text/markdown",
+        byteSize: 42,
+        originalFilename: "final-packet.md",
+      },
+    });
+
+    await db.insert(documents).values({
+      id: documentId,
+      companyId,
+      title: "Execution plan",
+      format: "markdown",
+      latestBody: "# Plan",
+      latestRevisionNumber: 1,
+      createdByAgentId: agentActivityId,
+      updatedByAgentId: agentActivityId,
+    });
+
+    await db.insert(issueDocuments).values({
+      id: issueDocumentId,
+      companyId,
+      issueId: grandchildIssueId,
+      documentId,
+      key: "plan",
+      audience: "human",
+    });
+
+    const graphByIdentifier = await svc.getGraph("PAP-2");
+    const graphByUuid = await svc.getGraph(childIssueId);
+
+    expect(graphByIdentifier?.rootIssueId).toBe(rootIssueId);
+    expect(graphByUuid?.rootIssueId).toBe(rootIssueId);
+    expect(new Set(graphByIdentifier?.issues.map((issue) => issue.id))).toEqual(
+      new Set([rootIssueId, childIssueId, grandchildIssueId, siblingIssueId]),
+    );
+    expect(graphByIdentifier?.issues.some((issue) => issue.id === outsideIssueId)).toBe(false);
+    expect(graphByIdentifier?.edges.some((edge) => edge.kind === "blocker" && edge.fromId === `issue:${siblingIssueId}` && edge.toId === `issue:${grandchildIssueId}`)).toBe(true);
+    expect(graphByIdentifier?.edges.some((edge) => edge.kind === "blocker" && edge.fromId === `issue:${outsideIssueId}`)).toBe(false);
+    expect(graphByIdentifier?.edges.some((edge) => edge.kind === "assigned-agent" && edge.issueId === childIssueId && edge.agentId === agentAssignedId)).toBe(true);
+    expect(graphByIdentifier?.edges.some((edge) => edge.kind === "participant-agent" && edge.issueId === childIssueId && edge.agentId === agentCommenterId)).toBe(true);
+    expect(graphByIdentifier?.edges.some((edge) => edge.kind === "participant-agent" && edge.issueId === grandchildIssueId && edge.agentId === agentActivityId)).toBe(true);
+    expect(graphByIdentifier?.deliverables.map((deliverable) => deliverable.deliverableKind)).toEqual(
+      expect.arrayContaining(["artifact", "document"]),
+    );
+    expect(graphByIdentifier?.edges.some((edge) => edge.kind === "issue-deliverable" && edge.deliverableId === artifactId)).toBe(true);
+    expect(graphByIdentifier?.edges.some((edge) => edge.kind === "issue-deliverable" && edge.deliverableId === issueDocumentId)).toBe(true);
   });
 });
 

@@ -66,11 +66,8 @@ import {
 import {
   execute as clickUpAgentRefExecute,
   testEnvironment as clickUpAgentRefTestEnvironment,
-} from "@paperclipai/adapter-clickup-agent-ref/server";
-import {
-  agentConfigurationDoc as clickUpAgentRefConfigurationDoc,
-  models as clickUpAgentRefModels,
-} from "@paperclipai/adapter-clickup-agent-ref";
+} from "../../../packages/adapters/clickup-agent-ref/dist/server/index.js";
+import * as clickUpAgentRefPackage from "../../../packages/adapters/clickup-agent-ref/dist/index.js";
 import { listCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
@@ -101,6 +98,29 @@ import { buildExternalAdapters } from "./plugin-loader.js";
 import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
+
+const clickUpAgentRefConfigurationDoc =
+  ("agentConfigurationDoc" in clickUpAgentRefPackage &&
+  typeof clickUpAgentRefPackage.agentConfigurationDoc === "string"
+    ? clickUpAgentRefPackage.agentConfigurationDoc
+    : "default" in clickUpAgentRefPackage &&
+        clickUpAgentRefPackage.default &&
+        typeof clickUpAgentRefPackage.default === "object" &&
+        "agentConfigurationDoc" in clickUpAgentRefPackage.default &&
+        typeof clickUpAgentRefPackage.default.agentConfigurationDoc === "string"
+      ? clickUpAgentRefPackage.default.agentConfigurationDoc
+      : "");
+
+const clickUpAgentRefModels =
+  ("models" in clickUpAgentRefPackage && Array.isArray(clickUpAgentRefPackage.models)
+    ? clickUpAgentRefPackage.models
+    : "default" in clickUpAgentRefPackage &&
+        clickUpAgentRefPackage.default &&
+        typeof clickUpAgentRefPackage.default === "object" &&
+        "models" in clickUpAgentRefPackage.default &&
+        Array.isArray(clickUpAgentRefPackage.default.models)
+      ? clickUpAgentRefPackage.default.models
+      : []) as Array<{ id: string; label: string }>;
 
 function normalizeHermesConfig<T extends { config?: unknown; agent?: unknown }>(ctx: T): T {
   const config =

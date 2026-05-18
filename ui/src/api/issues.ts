@@ -2,6 +2,7 @@ import type {
   AskUserQuestionsAnswer,
   Approval,
   DocumentRevision,
+  IssueGraphResponse,
   FeedbackTargetType,
   FeedbackTrace,
   FeedbackVote,
@@ -74,6 +75,7 @@ export const issuesApi = {
     api.post<IssueLabel>(`/companies/${companyId}/labels`, data),
   deleteLabel: (id: string) => api.delete<IssueLabel>(`/labels/${id}`),
   get: (id: string) => api.get<Issue>(`/issues/${id}`),
+  getGraph: (id: string) => api.get<IssueGraphResponse>(`/issues/${id}/graph`),
   markRead: (id: string) => api.post<{ id: string; lastReadAt: Date }>(`/issues/${id}/read`, {}),
   markUnread: (id: string) => api.delete<{ id: string; removed: boolean }>(`/issues/${id}/read`),
   archiveFromInbox: (id: string) =>

@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
+import * as clickUpAgentRefServerPackage from "../../../packages/adapters/clickup-agent-ref/dist/server/index.js";
 import { agentThreads, agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
 import { parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { issueService } from "./issues.js";
@@ -16,6 +16,30 @@ const MAX_IMPORTED_IDS = 1000;
 const MIN_POLL_CLAIM_MS = 45_000;
 const STALE_OUTBOUND_PROCESSING_MS = 2 * 60 * 1000;
 const BRIDGE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+
+const buildClickUpContextBody =
+  "buildClickUpContextBody" in clickUpAgentRefServerPackage &&
+  typeof clickUpAgentRefServerPackage.buildClickUpContextBody === "function"
+    ? clickUpAgentRefServerPackage.buildClickUpContextBody
+    : "default" in clickUpAgentRefServerPackage &&
+        clickUpAgentRefServerPackage.default &&
+        typeof clickUpAgentRefServerPackage.default === "object" &&
+        "buildClickUpContextBody" in clickUpAgentRefServerPackage.default &&
+        typeof clickUpAgentRefServerPackage.default.buildClickUpContextBody === "function"
+      ? clickUpAgentRefServerPackage.default.buildClickUpContextBody
+      : null;
+
+const buildCommentPayload =
+  "buildCommentPayload" in clickUpAgentRefServerPackage &&
+  typeof clickUpAgentRefServerPackage.buildCommentPayload === "function"
+    ? clickUpAgentRefServerPackage.buildCommentPayload
+    : "default" in clickUpAgentRefServerPackage &&
+        clickUpAgentRefServerPackage.default &&
+        typeof clickUpAgentRefServerPackage.default === "object" &&
+        "buildCommentPayload" in clickUpAgentRefServerPackage.default &&
+        typeof clickUpAgentRefServerPackage.default.buildCommentPayload === "function"
+      ? clickUpAgentRefServerPackage.default.buildCommentPayload
+      : null;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -128,7 +152,10 @@ function buildBridgeCommentPayload(
   body: string,
   cfg: ReturnType<typeof resolveConfig>,
 ): Record<string, unknown> {
-  const adapterConfig: Parameters<typeof buildCommentPayload>[1] = {
+  if (!buildCommentPayload) {
+    throw new Error("clickup_agent_ref server buildCommentPayload export is unavailable");
+  }
+  const adapterConfig = {
     apiBaseUrl: cfg.apiBaseUrl,
     authToken: cfg.authToken,
     workspaceId: "bridge",
@@ -199,6 +226,20 @@ function parseCommentCollection(rawText: string, errorPrefix: string): unknown[]
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${errorPrefix}: ${message}`);
   }
+}
+
+function buildClickUpContextBodyStrict(
+  context: Record<string, unknown>,
+  config: {
+    includeContextJson: boolean;
+    clickupAgentName?: string;
+    clickupAgentUrl?: string;
+  },
+): string {
+  if (!buildClickUpContextBody) {
+    throw new Error("clickup_agent_ref server buildClickUpContextBody export is unavailable");
+  }
+  return buildClickUpContextBody(context, config);
 }
 
 function buildTaskName(context: Record<string, unknown>, taskKey: string): string {
@@ -331,7 +372,7 @@ export function clickupBridgeService(db: Db) {
       const source = resolveBridgeSource(input.context);
       const cfg = resolveConfig(input.config);
       const taskName = buildTaskName(input.context, source.taskKey);
-      const body = buildClickUpContextBody(input.context, {
+      const body = buildClickUpContextBodyStrict(input.context, {
         clickupAgentName: cfg.clickupAgentName,
         clickupAgentUrl: cfg.clickupAgentUrl,
         includeContextJson: cfg.includeContextJson,

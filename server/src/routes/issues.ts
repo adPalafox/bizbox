@@ -1018,6 +1018,22 @@ export function issueRoutes(
     });
   });
 
+  router.get("/issues/:id/graph", async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+    const graph = await svc.getGraph(id);
+    if (!graph) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    res.json(graph);
+  });
+
   router.get("/issues/:id/work-products", async (req, res) => {
     const id = req.params.id as string;
     const issue = await svc.getById(id);
