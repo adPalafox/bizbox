@@ -659,17 +659,17 @@ describe("inbox helpers", () => {
     const parentIssue = makeIssue("parent-with-related", true);
     const childIssue = makeIssue("child-1", true);
     childIssue.parentId = parentIssue.id;
-    const outboundOnly = makeRelatedIssueSummary("outbound-1");
-    const inboundOnly = makeRelatedIssueSummary("inbound-1");
+    const outboundOnly = makeIssue("outbound-1", true);
+    const inboundOnly = makeIssue("inbound-1", true);
 
     parentIssue.relatedWork = {
       outbound: [
         { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
-        { issue: outboundOnly, mentionCount: 2, sources: [] },
+        { issue: makeRelatedIssueSummary(outboundOnly.id), mentionCount: 2, sources: [] },
       ],
       inbound: [
         { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
-        { issue: inboundOnly, mentionCount: 1, sources: [] },
+        { issue: makeRelatedIssueSummary(inboundOnly.id), mentionCount: 1, sources: [] },
       ],
     };
 
@@ -677,13 +677,19 @@ describe("inbox helpers", () => {
       [
         { kind: "issue", timestamp: 5, issue: parentIssue },
         { kind: "issue", timestamp: 4, issue: childIssue },
+        { kind: "issue", timestamp: 3, issue: outboundOnly },
+        { kind: "issue", timestamp: 2, issue: inboundOnly },
       ],
       "none",
       {},
       { nestingEnabled: true },
     );
 
-    expect(grouped?.displayItems).toHaveLength(1);
+    expect(
+      grouped?.displayItems
+        .filter((item): item is Extract<InboxWorkItem, { kind: "issue" }> => item.kind === "issue")
+        .map((item) => item.issue.id),
+    ).toEqual([parentIssue.id, outboundOnly.id, inboundOnly.id]);
     const nestedRows = grouped?.nestedByIssueId.get(parentIssue.id);
     expect(nestedRows?.children.map((issue) => issue.id)).toEqual([childIssue.id]);
     expect(nestedRows?.outbound.map((issue) => issue.id)).toEqual([outboundOnly.id]);
