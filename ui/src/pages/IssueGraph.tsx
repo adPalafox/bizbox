@@ -56,8 +56,11 @@ function deliverableHref(deliverable: IssueGraphDeliverableNode, issueIdentifier
   if (deliverable.deliverableKind === "artifact") {
     return `/deliverables/${deliverable.id}`;
   }
-  const documentKey = encodeURIComponent(deliverable.documentKey ?? "");
-  return `/issues/${issueIdentifierOrId}#document-${documentKey}`;
+  const documentKey = deliverable.documentKey;
+  if (!documentKey) {
+    return `/issues/${issueIdentifierOrId}`;
+  }
+  return `/issues/${issueIdentifierOrId}#document-${encodeURIComponent(documentKey)}`;
 }
 
 function edgeAnchor(rect: LayoutRect | undefined, side: "left" | "right" | "top" | "bottom") {

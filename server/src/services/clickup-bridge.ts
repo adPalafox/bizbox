@@ -41,6 +41,13 @@ const buildCommentPayload =
       ? clickUpAgentRefServerPackage.default.buildCommentPayload
       : null;
 
+type ClickUpCommentPayloadConfig = Parameters<
+  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
+>[1];
+type ClickUpContextBodyConfig = Parameters<
+  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
+>[1];
+
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
@@ -155,7 +162,7 @@ function buildBridgeCommentPayload(
   if (!buildCommentPayload) {
     throw new Error("clickup_agent_ref server buildCommentPayload export is unavailable");
   }
-  const adapterConfig = {
+  const adapterConfig: ClickUpCommentPayloadConfig = {
     apiBaseUrl: cfg.apiBaseUrl,
     authToken: cfg.authToken,
     workspaceId: "bridge",
@@ -230,11 +237,7 @@ function parseCommentCollection(rawText: string, errorPrefix: string): unknown[]
 
 function buildClickUpContextBodyStrict(
   context: Record<string, unknown>,
-  config: {
-    includeContextJson: boolean;
-    clickupAgentName?: string;
-    clickupAgentUrl?: string;
-  },
+  config: ClickUpContextBodyConfig,
 ): string {
   if (!buildClickUpContextBody) {
     throw new Error("clickup_agent_ref server buildClickUpContextBody export is unavailable");
