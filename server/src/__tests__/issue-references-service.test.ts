@@ -290,6 +290,10 @@ describeEmbeddedPostgres("issueReferenceService", () => {
     const summaries = await refs.listIssueReferenceSummaries(companyId, [sourceIssueId, targetIssueId]);
 
     expect(summaries.get(sourceIssueId)?.outbound.map((item) => item.issue.identifier)).toEqual(["PAP-2"]);
-    expect(summaries.get(targetIssueId)?.inbound.map((item) => item.issue.identifier)).toEqual(["PAP-1", "PAP-3"]);
+    expect(
+      [...(summaries.get(targetIssueId)?.inbound ?? [])]
+        .sort((a, b) => (a.issue.identifier ?? "").localeCompare(b.issue.identifier ?? ""))
+        .map((item) => item.issue.identifier),
+    ).toEqual(["PAP-1", "PAP-3"]);
   });
 });
