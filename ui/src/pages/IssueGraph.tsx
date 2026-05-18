@@ -421,6 +421,11 @@ export function IssueGraph() {
         onTouchMove={onTouchMove}
         onTouchEnd={stopDrag}
         onTouchCancel={stopDrag}
+        onWheel={(event) => {
+          event.preventDefault();
+          const delta = event.deltaY > 0 ? -0.1 : 0.1;
+          setZoom((value) => clampZoom(value + delta));
+        }}
       >
         <div
           className="absolute left-0 top-0"
@@ -556,7 +561,7 @@ export function IssueGraph() {
           {data.deliverables.map((deliverable) => {
             const rect = layout.detailRects.get(deliverableNodeId(deliverable.id));
             if (!rect) return null;
-            const issue = data.issues.find((entry) => entry.id === deliverable.issueId);
+            const issue = layout.issueMap.get(deliverable.issueId);
             if (!issue) return null;
             return (
               <Link
