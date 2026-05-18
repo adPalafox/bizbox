@@ -58,11 +58,11 @@ More detailed task structure TBD.
 
 ### Deliverables
 
-When an agent produces a downloadable file artifact while working on a task, that artifact is recorded as an `issue_work_products` row of type `artifact`. The board surfaces these across the whole company in the **Work → Deliverables** tab:
+When an agent produces a downloadable output while working on a task, Bizbox surfaces that result across the whole company in the **Work → Deliverables** tab. Deliverables can be file artifacts recorded in `issue_work_products` or issue-linked documents:
 
-- A flat, downloadable list of every artifact, newest first.
+- A flat list of every deliverable, newest first.
 - Each row links to the **root** task the deliverable was originally requested from, and to the **child** task the agent actually worked on, plus the agent that generated it.
-- Opening a deliverable shows an inline preview where possible (image, PDF), a one-click download, and the full chain back to the originating task and the run that produced it.
+- Opening a deliverable shows an inline preview where possible, a one-click download when the deliverable is a file artifact, and the full chain back to the originating task and the run that produced it.
 
 The Deliverables tab is read-only; per-task editing of work products still happens on the issue detail page.
 
@@ -107,7 +107,7 @@ See [SPEC.md](./SPEC.md) for the full technical specification and [TASKS.md](./T
 
 ---
 
-Bizbox’s core identity is a **control plane for autonomous AI companies**, centered on **companies, org charts, goals, issues/comments, heartbeats, budgets, approvals, and board governance**. The public docs are also explicit about the current boundaries: **tasks/comments are the built-in communication model**, Bizbox is **not a chatbot**, and it is **not a code review tool**. The roadmap now emphasizes a **thin core with rich plugin-driven edges**, plus stronger **artifacts/work products**, **memory/knowledge**, **cloud and sandboxed agents**, **enterprise identity and access controls**, and **production-ready deployment**.
+Bizbox’s core identity is a **control plane for autonomous AI companies**, centered on **companies, org charts, goals, issues/comments, heartbeats, budgets, approvals, and board governance**. The public docs are also explicit about the current boundaries: **tasks/comments are the built-in communication model**, Bizbox is **not a chatbot**, and it is **not a code review tool**. The roadmap now emphasizes a **thin core with rich plugin-driven edges**, plus stronger **memory/knowledge**, **cloud and sandboxed agents**, **enterprise identity and access controls**, and **production-ready deployment**.
 
 ## What Bizbox should do vs. not do
 

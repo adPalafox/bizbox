@@ -40,7 +40,7 @@ It looks like a task manager — but under the hood it has org charts, budgets, 
 
 <br/>
 
-> **On the roadmap:** next major areas include first-class artifacts and work products, stronger company memory/knowledge, cloud and sandboxed agents, enterprise auth, and production-ready Kubernetes deployment. See [ROADMAP.md](ROADMAP.md).
+> **On the roadmap:** next major areas include stronger company memory/knowledge, cloud and sandboxed agents, enterprise auth, and production-ready Kubernetes deployment. See [ROADMAP.md](ROADMAP.md).
 
 <br/>
 
@@ -367,7 +367,7 @@ See [doc/DEVELOPING.md](doc/DEVELOPING.md) for the full development guide.
 - ✅ Better Budgeting
 - ✅ Agent Reviews and Approvals
 - ✅ Multiple Human Users
-- ⚪ Artifacts & Work Products
+- ✅ Deliverables & Work Products
 - ⚪ Memory / Knowledge
 - ⚪ Cloud / Sandbox agents (e.g. Cursor / e2b agents)
 - ⚪ Enterprise SSO / SAML integration
