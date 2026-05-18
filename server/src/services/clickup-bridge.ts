@@ -241,13 +241,6 @@ function parseCommentCollection(rawText: string, errorPrefix: string): unknown[]
   }
 }
 
-function buildClickUpContextBodyStrict(
-  context: Record<string, unknown>,
-  config: ClickUpContextBodyConfig,
-): string {
-  return buildClickUpContextBody(context, config);
-}
-
 function buildTaskName(context: Record<string, unknown>, taskKey: string): string {
   const issue = parseObject(context.issue);
   const wake = parseObject(context.paperclipWake);
@@ -378,11 +371,12 @@ export function clickupBridgeService(db: Db) {
       const source = resolveBridgeSource(input.context);
       const cfg = resolveConfig(input.config);
       const taskName = buildTaskName(input.context, source.taskKey);
-      const body = buildClickUpContextBodyStrict(input.context, {
+      const contextConfig: ClickUpContextBodyConfig = {
         clickupAgentName: cfg.clickupAgentName,
         clickupAgentUrl: cfg.clickupAgentUrl,
         includeContextJson: cfg.includeContextJson,
-      });
+      };
+      const body = buildClickUpContextBody(input.context, contextConfig);
       const now = new Date();
       const [upsertedBridge] = await db
         .insert(clickupBridges)
