@@ -1975,21 +1975,17 @@ describeEmbeddedPostgres("issueService.findMentionedProjectIds", () => {
 describeEmbeddedPostgres("issueService.clearExecutionRunIfTerminal", () => {
   let db!: ReturnType<typeof createDb>;
   let svc!: ReturnType<typeof issueService>;
-  let refs!: ReturnType<typeof issueReferenceService>;
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
 
   beforeAll(async () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issues-execution-lock-");
     db = createDb(tempDb.connectionString);
     svc = issueService(db);
-    refs = issueReferenceService(db);
     await ensureIssueRelationsTable(db);
-    await ensureIssueReferenceMentionsTable(db);
   }, 20_000);
 
   afterEach(async () => {
     await db.delete(issueComments);
-    await db.delete(issueReferenceMentions);
     await db.delete(issueRelations);
     await db.delete(issueInboxArchives);
     await db.delete(activityLog);
@@ -2106,6 +2102,42 @@ describeEmbeddedPostgres("issueService.clearExecutionRunIfTerminal", () => {
       .where(eq(issues.id, issueId))
       .then((rows) => rows[0]);
     expect(row).toEqual({ executionRunId: null, executionLockedAt: null });
+  });
+});
+
+describeEmbeddedPostgres("issueService.list includeRelatedWork", () => {
+  let db!: ReturnType<typeof createDb>;
+  let svc!: ReturnType<typeof issueService>;
+  let refs!: ReturnType<typeof issueReferenceService>;
+  let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+
+  beforeAll(async () => {
+    tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issues-related-work-");
+    db = createDb(tempDb.connectionString);
+    svc = issueService(db);
+    refs = issueReferenceService(db);
+    await ensureIssueRelationsTable(db);
+    await ensureIssueReferenceMentionsTable(db);
+  }, 20_000);
+
+  afterEach(async () => {
+    await db.delete(issueComments);
+    await db.delete(issueReferenceMentions);
+    await db.delete(issueRelations);
+    await db.delete(issueInboxArchives);
+    await db.delete(activityLog);
+    await db.delete(issues);
+    await db.delete(executionWorkspaces);
+    await db.delete(projectWorkspaces);
+    await db.delete(projects);
+    await db.delete(goals);
+    await db.delete(agents);
+    await db.delete(instanceSettings);
+    await db.delete(companies);
+  });
+
+  afterAll(async () => {
+    await tempDb?.cleanup();
   });
 
   it("does not include related work by default and populates it when requested", async () => {
