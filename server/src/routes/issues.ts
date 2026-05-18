@@ -801,6 +801,8 @@ export function issueRoutes(
         req.query.includeRoutineExecutions === "true" || req.query.includeRoutineExecutions === "1",
       excludeRoutineExecutions:
         req.query.excludeRoutineExecutions === "true" || req.query.excludeRoutineExecutions === "1",
+      includeRelatedWork:
+        req.query.includeRelatedWork === "true" || req.query.includeRelatedWork === "1",
       q: req.query.q as string | undefined,
       limit,
     });

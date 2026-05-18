@@ -241,4 +241,59 @@ describeEmbeddedPostgres("issueReferenceService", () => {
     expect(summary.outbound[0]?.mentionCount).toBe(2);
     expect(summary.outbound[0]?.sources.map((source) => source.label)).toEqual(["plan", "comment"]);
   });
+
+  it("loads related-work summaries for multiple issues in one batch", async () => {
+    const companyId = randomUUID();
+    const sourceIssueId = randomUUID();
+    const targetIssueId = randomUUID();
+    const inboundSourceIssueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip Batch",
+      issuePrefix: `C${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(issues).values([
+      {
+        id: sourceIssueId,
+        companyId,
+        title: "Source issue",
+        description: "References PAP-2",
+        status: "todo",
+        priority: "medium",
+        identifier: "PAP-1",
+      },
+      {
+        id: targetIssueId,
+        companyId,
+        title: "Target issue",
+        status: "in_progress",
+        priority: "high",
+        identifier: "PAP-2",
+      },
+      {
+        id: inboundSourceIssueId,
+        companyId,
+        title: "Inbound source",
+        description: "Also references PAP-2",
+        status: "todo",
+        priority: "medium",
+        identifier: "PAP-3",
+      },
+    ]);
+
+    await refs.syncIssue(sourceIssueId);
+    await refs.syncIssue(inboundSourceIssueId);
+
+    const summaries = await refs.listIssueReferenceSummaries(companyId, [sourceIssueId, targetIssueId]);
+
+    expect(summaries.get(sourceIssueId)?.outbound.map((item) => item.issue.identifier)).toEqual(["PAP-2"]);
+    expect(
+      [...(summaries.get(targetIssueId)?.inbound ?? [])]
+        .sort((a, b) => (a.issue.identifier ?? "").localeCompare(b.issue.identifier ?? ""))
+        .map((item) => item.issue.identifier),
+    ).toEqual(["PAP-1", "PAP-3"]);
+  });
 });

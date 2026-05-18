@@ -40,6 +40,7 @@ export const issuesApi = {
       originKind?: string;
       originId?: string;
       includeRoutineExecutions?: boolean;
+      includeRelatedWork?: boolean;
       q?: string;
       limit?: number;
     },
@@ -60,6 +61,7 @@ export const issuesApi = {
     if (filters?.originKind) params.set("originKind", filters.originKind);
     if (filters?.originId) params.set("originId", filters.originId);
     if (filters?.includeRoutineExecutions) params.set("includeRoutineExecutions", "true");
+    if (filters?.includeRelatedWork) params.set("includeRelatedWork", "true");
     if (filters?.q) params.set("q", filters.q);
     if (filters?.limit) params.set("limit", String(filters.limit));
     const qs = params.toString();

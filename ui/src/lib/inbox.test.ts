@@ -7,6 +7,7 @@ import type {
   ExecutionWorkspace,
   HeartbeatRun,
   Issue,
+  IssueRelationIssueSummary,
   JoinRequest,
   ProjectWorkspace,
 } from "@paperclipai/shared";
@@ -209,6 +210,18 @@ function makeIssue(id: string, isUnreadForMe: boolean): Issue {
     lastExternalCommentAt: new Date("2026-03-11T01:00:00.000Z"),
     lastActivityAt: new Date("2026-03-11T01:00:00.000Z"),
     isUnreadForMe,
+  };
+}
+
+function makeRelatedIssueSummary(id: string): IssueRelationIssueSummary {
+  return {
+    id,
+    identifier: `PAP-${id}`,
+    title: `Related ${id}`,
+    status: "todo",
+    priority: "medium",
+    assigneeAgentId: null,
+    assigneeUserId: null,
   };
 }
 
@@ -579,7 +592,7 @@ describe("inbox helpers", () => {
         {
           key: "visible-group",
           displayItems: [{ kind: "issue", timestamp: 3, issue: visibleIssue }],
-          childrenByIssueId: new Map(),
+          nestedByIssueId: new Map(),
         },
         {
           key: "hidden-group",
@@ -587,7 +600,7 @@ describe("inbox helpers", () => {
             { kind: "issue", timestamp: 2, issue: hiddenIssue },
             { kind: "approval", timestamp: 1, approval },
           ],
-          childrenByIssueId: new Map(),
+          nestedByIssueId: new Map(),
         },
       ],
       new Set(["hidden-group"]),
@@ -612,7 +625,11 @@ describe("inbox helpers", () => {
       {
         key: "workspace:default",
         displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
-        childrenByIssueId: new Map([[parentIssue.id, [childIssue]]]),
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [childIssue],
+          outbound: [],
+          inbound: [],
+        }]]),
       },
     ];
 
@@ -620,21 +637,185 @@ describe("inbox helpers", () => {
       buildInboxKeyboardNavEntries(groupedSections, new Set(), new Set()).map((entry) => entry.type === "top"
         ? entry.itemKey
         : entry.type === "child"
-          ? entry.issueId
+          ? entry.rowKey
           : entry.groupKey),
     ).toEqual([
       `workspace:default:${getInboxWorkItemKey({ kind: "issue", timestamp: 2, issue: parentIssue })}`,
-      childIssue.id,
+      `child:${parentIssue.id}:${childIssue.id}`,
     ]);
 
     expect(
       buildInboxKeyboardNavEntries(groupedSections, new Set(), new Set([parentIssue.id])).map((entry) => entry.type === "top"
         ? entry.itemKey
         : entry.type === "child"
-          ? entry.issueId
+          ? entry.rowKey
           : entry.groupKey),
     ).toEqual([
       `workspace:default:${getInboxWorkItemKey({ kind: "issue", timestamp: 2, issue: parentIssue })}`,
+    ]);
+  });
+
+  it("keeps child issues separate from nested references and excludes child duplicates from reference sections", () => {
+    const parentIssue = makeIssue("parent-with-related", true);
+    const childIssue = makeIssue("child-1", true);
+    childIssue.parentId = parentIssue.id;
+    const outboundOnly = makeIssue("outbound-1", true);
+    const inboundOnly = makeIssue("inbound-1", true);
+
+    parentIssue.relatedWork = {
+      outbound: [
+        { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
+        { issue: makeRelatedIssueSummary(outboundOnly.id), mentionCount: 2, sources: [] },
+      ],
+      inbound: [
+        { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
+        { issue: makeRelatedIssueSummary(inboundOnly.id), mentionCount: 1, sources: [] },
+      ],
+    };
+
+    const [grouped] = buildGroupedInboxSections(
+      [
+        { kind: "issue", timestamp: 5, issue: parentIssue },
+        { kind: "issue", timestamp: 4, issue: childIssue },
+        { kind: "issue", timestamp: 3, issue: outboundOnly },
+        { kind: "issue", timestamp: 2, issue: inboundOnly },
+      ],
+      "none",
+      {},
+      { nestingEnabled: true },
+    );
+
+    expect(
+      grouped?.displayItems
+        .filter((item): item is Extract<InboxWorkItem, { kind: "issue" }> => item.kind === "issue")
+        .map((item) => item.issue.id),
+    ).toEqual([parentIssue.id, outboundOnly.id, inboundOnly.id]);
+    const nestedRows = grouped?.nestedByIssueId.get(parentIssue.id);
+    expect(nestedRows?.children.map((issue) => issue.id)).toEqual([childIssue.id]);
+    expect(nestedRows?.outbound.map((issue) => issue.id)).toEqual([outboundOnly.id]);
+    expect(nestedRows?.inbound.map((issue) => issue.id)).toEqual([inboundOnly.id]);
+  });
+
+  it("only renders related-work rows when the related issue independently belongs to the current section", () => {
+    const parentIssue = makeIssue("parent-filtered-related", true);
+    const visibleRelated = makeIssue("visible-related", true);
+    const hiddenRelated = makeRelatedIssueSummary("hidden-related");
+
+    parentIssue.relatedWork = {
+      outbound: [
+        { issue: makeRelatedIssueSummary(visibleRelated.id), mentionCount: 1, sources: [] },
+        { issue: hiddenRelated, mentionCount: 1, sources: [] },
+      ],
+      inbound: [],
+    };
+
+    const [grouped] = buildGroupedInboxSections(
+      [
+        { kind: "issue", timestamp: 5, issue: parentIssue },
+        { kind: "issue", timestamp: 4, issue: visibleRelated },
+      ],
+      "none",
+      {},
+      { nestingEnabled: true },
+    );
+
+    const nestedRows = grouped?.nestedByIssueId.get(parentIssue.id);
+    expect(nestedRows?.outbound.map((issue) => issue.id)).toEqual([visibleRelated.id]);
+    expect(nestedRows?.outbound.map((issue) => issue.id)).not.toContain(hiddenRelated.id);
+  });
+
+  it("never renders a child issue as related work under a different parent in the same section", () => {
+    const parentIssue = makeIssue("parent-a", true);
+    const otherParentIssue = makeIssue("parent-b", true);
+    const childIssue = makeIssue("shared-child", true);
+    childIssue.parentId = otherParentIssue.id;
+
+    parentIssue.relatedWork = {
+      outbound: [
+        { issue: makeRelatedIssueSummary(childIssue.id), mentionCount: 1, sources: [] },
+      ],
+      inbound: [],
+    };
+
+    const [grouped] = buildGroupedInboxSections(
+      [
+        { kind: "issue", timestamp: 6, issue: parentIssue },
+        { kind: "issue", timestamp: 5, issue: otherParentIssue },
+        { kind: "issue", timestamp: 4, issue: childIssue },
+      ],
+      "none",
+      {},
+      { nestingEnabled: true },
+    );
+
+    expect(grouped?.nestedByIssueId.get(parentIssue.id)?.outbound).toEqual([]);
+    expect(grouped?.nestedByIssueId.get(otherParentIssue.id)?.children.map((issue) => issue.id)).toEqual([childIssue.id]);
+  });
+
+  it("adds outbound and inbound reference rows to keyboard navigation only when the parent is expanded", () => {
+    const parentIssue = makeIssue("parent-related-nav", true);
+    const outboundIssue = makeRelatedIssueSummary("outbound-nav");
+    const inboundIssue = makeRelatedIssueSummary("inbound-nav");
+
+    const entries = buildInboxKeyboardNavEntries(
+      [{
+        key: "workspace:default",
+        displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [],
+          outbound: [outboundIssue],
+          inbound: [inboundIssue],
+        }]]),
+      }],
+      new Set(),
+      new Set(),
+    );
+
+    expect(entries.map((entry) => entry.type === "child" ? entry.rowKey : entry.type)).toEqual([
+      "top",
+      `outbound:${parentIssue.id}:${outboundIssue.id}`,
+      `inbound:${parentIssue.id}:${inboundIssue.id}`,
+    ]);
+
+    const collapsedEntries = buildInboxKeyboardNavEntries(
+      [{
+        key: "workspace:default",
+        displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [],
+          outbound: [outboundIssue],
+          inbound: [inboundIssue],
+        }]]),
+      }],
+      new Set(),
+      new Set([parentIssue.id]),
+    );
+
+    expect(collapsedEntries.map((entry) => entry.type)).toEqual(["top"]);
+  });
+
+  it("treats each visible nested related-work row as its own keyboard target even for the same issue id", () => {
+    const parentIssue = makeIssue("parent-related-duplicates", true);
+    const repeatedRelated = makeRelatedIssueSummary("shared-related");
+
+    const entries = buildInboxKeyboardNavEntries(
+      [{
+        key: "workspace:default",
+        displayItems: [{ kind: "issue", timestamp: 2, issue: parentIssue } satisfies InboxWorkItem],
+        nestedByIssueId: new Map([[parentIssue.id, {
+          children: [],
+          outbound: [repeatedRelated],
+          inbound: [repeatedRelated],
+        }]]),
+      }],
+      new Set(),
+      new Set(),
+    );
+
+    expect(entries.map((entry) => entry.type === "child" ? entry.rowKey : entry.type)).toEqual([
+      "top",
+      `outbound:${parentIssue.id}:${repeatedRelated.id}`,
+      `inbound:${parentIssue.id}:${repeatedRelated.id}`,
     ]);
   });
 
@@ -646,13 +827,13 @@ describe("inbox helpers", () => {
         key: "priority:high",
         label: "High priority",
         displayItems: [{ kind: "issue", timestamp: 3, issue: visibleIssue } satisfies InboxWorkItem],
-        childrenByIssueId: new Map(),
+        nestedByIssueId: new Map(),
       },
       {
         key: "priority:medium",
         label: "Medium priority",
         displayItems: [{ kind: "issue", timestamp: 2, issue: hiddenIssue } satisfies InboxWorkItem],
-        childrenByIssueId: new Map(),
+        nestedByIssueId: new Map(),
       },
     ];
 

@@ -13,6 +13,7 @@ import {
   instanceSettings,
   issueComments,
   issueInboxArchives,
+  issueReferenceMentions,
   issueRelations,
   issues,
   projectWorkspaces,
@@ -34,6 +35,7 @@ vi.mock("../otel.js", () => ({
 
 import { instanceSettingsService } from "../services/instance-settings.ts";
 import { clampIssueListLimit, ISSUE_LIST_MAX_LIMIT, issueService } from "../services/issues.ts";
+import { issueReferenceService } from "../services/issue-references.ts";
 import { recordHumanIntervened, recordIssueCreated } from "../otel.js";
 import { buildProjectMentionHref } from "@paperclipai/shared";
 
@@ -61,6 +63,29 @@ async function ensureIssueRelationsTable(db: ReturnType<typeof createDb>) {
       "created_at" timestamptz NOT NULL DEFAULT now(),
       "updated_at" timestamptz NOT NULL DEFAULT now()
     );
+  `));
+}
+
+async function ensureIssueReferenceMentionsTable(db: ReturnType<typeof createDb>) {
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "issue_reference_mentions" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      "company_id" uuid NOT NULL,
+      "source_issue_id" uuid NOT NULL REFERENCES "issues"("id") ON DELETE CASCADE,
+      "target_issue_id" uuid NOT NULL REFERENCES "issues"("id") ON DELETE CASCADE,
+      "source_kind" text NOT NULL,
+      "source_record_id" uuid,
+      "document_key" text,
+      "matched_text" text,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "updated_at" timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS "issue_reference_mentions_company_source_issue_idx"
+      ON "issue_reference_mentions" ("company_id", "source_issue_id");
+    CREATE INDEX IF NOT EXISTS "issue_reference_mentions_company_target_issue_idx"
+      ON "issue_reference_mentions" ("company_id", "target_issue_id");
+    CREATE UNIQUE INDEX IF NOT EXISTS "issue_reference_mentions_company_source_mention_uq"
+      ON "issue_reference_mentions" ("company_id", "source_issue_id", "target_issue_id", "source_kind", "source_record_id");
   `));
 }
 
@@ -1956,6 +1981,7 @@ describeEmbeddedPostgres("issueService.clearExecutionRunIfTerminal", () => {
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issues-execution-lock-");
     db = createDb(tempDb.connectionString);
     svc = issueService(db);
+    await ensureIssueRelationsTable(db);
   }, 20_000);
 
   afterEach(async () => {
@@ -2076,5 +2102,105 @@ describeEmbeddedPostgres("issueService.clearExecutionRunIfTerminal", () => {
       .where(eq(issues.id, issueId))
       .then((rows) => rows[0]);
     expect(row).toEqual({ executionRunId: null, executionLockedAt: null });
+  });
+});
+
+describeEmbeddedPostgres("issueService.list includeRelatedWork", () => {
+  let db!: ReturnType<typeof createDb>;
+  let svc!: ReturnType<typeof issueService>;
+  let refs!: ReturnType<typeof issueReferenceService>;
+  let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+
+  beforeAll(async () => {
+    tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issues-related-work-");
+    db = createDb(tempDb.connectionString);
+    svc = issueService(db);
+    refs = issueReferenceService(db);
+    await ensureIssueRelationsTable(db);
+    await ensureIssueReferenceMentionsTable(db);
+  }, 20_000);
+
+  afterEach(async () => {
+    await db.delete(issueComments);
+    await db.delete(issueReferenceMentions);
+    await db.delete(issueRelations);
+    await db.delete(issueInboxArchives);
+    await db.delete(activityLog);
+    await db.delete(issues);
+    await db.delete(executionWorkspaces);
+    await db.delete(projectWorkspaces);
+    await db.delete(projects);
+    await db.delete(goals);
+    await db.delete(agents);
+    await db.delete(instanceSettings);
+    await db.delete(companies);
+  });
+
+  afterAll(async () => {
+    await tempDb?.cleanup();
+  });
+
+  it("does not include related work by default and populates it when requested", async () => {
+    const companyId = randomUUID();
+    const sourceIssueId = randomUUID();
+    const targetIssueId = randomUUID();
+    const inboundIssueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip Related Work",
+      issuePrefix: `L${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(issues).values([
+      {
+        id: sourceIssueId,
+        companyId,
+        title: "Source issue references PAP-2",
+        description: null,
+        status: "todo",
+        priority: "medium",
+        identifier: "PAP-1",
+      },
+      {
+        id: targetIssueId,
+        companyId,
+        title: "Target issue",
+        description: null,
+        status: "in_progress",
+        priority: "high",
+        identifier: "PAP-2",
+      },
+      {
+        id: inboundIssueId,
+        companyId,
+        title: "Inbound source references PAP-2",
+        description: null,
+        status: "todo",
+        priority: "medium",
+        identifier: "PAP-3",
+      },
+    ]);
+
+    await refs.syncIssue(sourceIssueId);
+    await refs.syncIssue(inboundIssueId);
+
+    const defaultRows = await svc.list(companyId, {});
+    const defaultSource = defaultRows.find((issue) => issue.id === sourceIssueId);
+    expect(defaultSource?.relatedWork).toBeUndefined();
+    expect(defaultSource?.referencedIssueIdentifiers).toBeUndefined();
+
+    const enrichedRows = await svc.list(companyId, { includeRelatedWork: true });
+    const sourceIssue = enrichedRows.find((issue) => issue.id === sourceIssueId);
+    const targetIssue = enrichedRows.find((issue) => issue.id === targetIssueId);
+
+    expect(sourceIssue?.relatedWork?.outbound.map((item) => item.issue.identifier)).toEqual(["PAP-2"]);
+    expect(sourceIssue?.referencedIssueIdentifiers).toEqual(["PAP-2"]);
+    expect(
+      [...(targetIssue?.relatedWork?.inbound ?? [])]
+        .sort((a, b) => (a.issue.identifier ?? "").localeCompare(b.issue.identifier ?? ""))
+        .map((item) => item.issue.identifier),
+    ).toEqual(["PAP-1", "PAP-3"]);
   });
 });

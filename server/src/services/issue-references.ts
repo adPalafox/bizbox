@@ -84,6 +84,50 @@ function emptySummary(): IssueRelatedWorkSummary {
   };
 }
 
+function mapRelatedWorkRows(rows: Array<{
+  anchorIssueId: string;
+  relatedIssueId: string;
+  relatedIssueIdentifier: string | null;
+  relatedIssueTitle: string;
+  relatedIssueStatus: IssueRelationIssueSummary["status"];
+  relatedIssuePriority: IssueRelationIssueSummary["priority"];
+  relatedIssueAssigneeAgentId: string | null;
+  relatedIssueAssigneeUserId: string | null;
+  sourceKind: IssueReferenceSourceKind;
+  sourceRecordId: string | null;
+  documentKey: string | null;
+  matchedText: string | null;
+}>): Map<string, IssueRelatedWorkItem[]> {
+  const groupedByAnchor = new Map<string, Map<string, IssueRelatedWorkItem>>();
+
+  for (const row of rows) {
+    const relatedById = groupedByAnchor.get(row.anchorIssueId) ?? new Map<string, IssueRelatedWorkItem>();
+    const existing = relatedById.get(row.relatedIssueId) ?? {
+      issue: toIssueSummary(row),
+      mentionCount: 0,
+      sources: [],
+    };
+    existing.mentionCount += 1;
+    existing.sources.push({
+      kind: row.sourceKind,
+      sourceRecordId: row.sourceRecordId,
+      label: sourceLabel(row.sourceKind, row.documentKey),
+      matchedText: row.matchedText,
+    });
+    relatedById.set(row.relatedIssueId, existing);
+    groupedByAnchor.set(row.anchorIssueId, relatedById);
+  }
+
+  return new Map(
+    [...groupedByAnchor.entries()].map(([anchorIssueId, relatedById]) => [
+      anchorIssueId,
+      [...relatedById.values()]
+        .map((item) => ({ ...item, sources: [...item.sources].sort(sortSources) }))
+        .sort(sortRelatedWork),
+    ]),
+  );
+}
+
 function diffIssueSummaries(
   before: IssueRelatedWorkSummary,
   after: IssueRelatedWorkSummary,
@@ -305,92 +349,77 @@ export function issueReferenceService(db: Db) {
     }
   }
 
+  async function listIssueReferenceSummaries(
+    companyId: string,
+    issueIds: string[],
+    dbOrTx: any = db,
+  ): Promise<Map<string, IssueRelatedWorkSummary>> {
+    const uniqueIssueIds = [...new Set(issueIds.filter(Boolean))];
+    const summaries = new Map<string, IssueRelatedWorkSummary>();
+    if (uniqueIssueIds.length === 0) return summaries;
+
+    const [outboundRows, inboundRows] = await Promise.all([
+      dbOrTx
+        .select({
+          anchorIssueId: issueReferenceMentions.sourceIssueId,
+          relatedIssueId: issues.id,
+          relatedIssueIdentifier: issues.identifier,
+          relatedIssueTitle: issues.title,
+          relatedIssueStatus: issues.status,
+          relatedIssuePriority: issues.priority,
+          relatedIssueAssigneeAgentId: issues.assigneeAgentId,
+          relatedIssueAssigneeUserId: issues.assigneeUserId,
+          sourceKind: issueReferenceMentions.sourceKind,
+          sourceRecordId: issueReferenceMentions.sourceRecordId,
+          documentKey: issueReferenceMentions.documentKey,
+          matchedText: issueReferenceMentions.matchedText,
+        })
+        .from(issueReferenceMentions)
+        .innerJoin(issues, eq(issueReferenceMentions.targetIssueId, issues.id))
+        .where(and(
+          eq(issueReferenceMentions.companyId, companyId),
+          inArray(issueReferenceMentions.sourceIssueId, uniqueIssueIds),
+        )),
+      dbOrTx
+        .select({
+          anchorIssueId: issueReferenceMentions.targetIssueId,
+          relatedIssueId: issues.id,
+          relatedIssueIdentifier: issues.identifier,
+          relatedIssueTitle: issues.title,
+          relatedIssueStatus: issues.status,
+          relatedIssuePriority: issues.priority,
+          relatedIssueAssigneeAgentId: issues.assigneeAgentId,
+          relatedIssueAssigneeUserId: issues.assigneeUserId,
+          sourceKind: issueReferenceMentions.sourceKind,
+          sourceRecordId: issueReferenceMentions.sourceRecordId,
+          documentKey: issueReferenceMentions.documentKey,
+          matchedText: issueReferenceMentions.matchedText,
+        })
+        .from(issueReferenceMentions)
+        .innerJoin(issues, eq(issueReferenceMentions.sourceIssueId, issues.id))
+        .where(and(
+          eq(issueReferenceMentions.companyId, companyId),
+          inArray(issueReferenceMentions.targetIssueId, uniqueIssueIds),
+        )),
+    ]);
+
+    const outboundByIssueId = mapRelatedWorkRows(outboundRows);
+    const inboundByIssueId = mapRelatedWorkRows(inboundRows);
+
+    for (const issueId of uniqueIssueIds) {
+      summaries.set(issueId, {
+        outbound: outboundByIssueId.get(issueId) ?? [],
+        inbound: inboundByIssueId.get(issueId) ?? [],
+      });
+    }
+
+    return summaries;
+  }
+
   async function listIssueReferenceSummary(issueId: string, dbOrTx: any = db): Promise<IssueRelatedWorkSummary> {
-      const issue = await issueById(issueId, dbOrTx);
-      if (!issue) throw notFound("Issue not found");
-
-      const [outboundRows, inboundRows] = await Promise.all([
-        dbOrTx
-          .select({
-            relatedIssueId: issues.id,
-            relatedIssueIdentifier: issues.identifier,
-            relatedIssueTitle: issues.title,
-            relatedIssueStatus: issues.status,
-            relatedIssuePriority: issues.priority,
-            relatedIssueAssigneeAgentId: issues.assigneeAgentId,
-            relatedIssueAssigneeUserId: issues.assigneeUserId,
-            sourceKind: issueReferenceMentions.sourceKind,
-            sourceRecordId: issueReferenceMentions.sourceRecordId,
-            documentKey: issueReferenceMentions.documentKey,
-            matchedText: issueReferenceMentions.matchedText,
-          })
-          .from(issueReferenceMentions)
-          .innerJoin(issues, eq(issueReferenceMentions.targetIssueId, issues.id))
-          .where(and(
-            eq(issueReferenceMentions.companyId, issue.companyId),
-            eq(issueReferenceMentions.sourceIssueId, issueId),
-          )),
-        dbOrTx
-          .select({
-            relatedIssueId: issues.id,
-            relatedIssueIdentifier: issues.identifier,
-            relatedIssueTitle: issues.title,
-            relatedIssueStatus: issues.status,
-            relatedIssuePriority: issues.priority,
-            relatedIssueAssigneeAgentId: issues.assigneeAgentId,
-            relatedIssueAssigneeUserId: issues.assigneeUserId,
-            sourceKind: issueReferenceMentions.sourceKind,
-            sourceRecordId: issueReferenceMentions.sourceRecordId,
-            documentKey: issueReferenceMentions.documentKey,
-            matchedText: issueReferenceMentions.matchedText,
-          })
-          .from(issueReferenceMentions)
-          .innerJoin(issues, eq(issueReferenceMentions.sourceIssueId, issues.id))
-          .where(and(
-            eq(issueReferenceMentions.companyId, issue.companyId),
-            eq(issueReferenceMentions.targetIssueId, issueId),
-          )),
-      ]);
-
-      const mapRows = (rows: Array<{
-        relatedIssueId: string;
-        relatedIssueIdentifier: string | null;
-        relatedIssueTitle: string;
-        relatedIssueStatus: IssueRelationIssueSummary["status"];
-        relatedIssuePriority: IssueRelationIssueSummary["priority"];
-        relatedIssueAssigneeAgentId: string | null;
-        relatedIssueAssigneeUserId: string | null;
-        sourceKind: IssueReferenceSourceKind;
-        sourceRecordId: string | null;
-        documentKey: string | null;
-        matchedText: string | null;
-      }>) => {
-        const grouped = new Map<string, IssueRelatedWorkItem>();
-        for (const row of rows) {
-          const existing = grouped.get(row.relatedIssueId) ?? {
-            issue: toIssueSummary(row),
-            mentionCount: 0,
-            sources: [],
-          };
-          existing.mentionCount += 1;
-          existing.sources.push({
-            kind: row.sourceKind,
-            sourceRecordId: row.sourceRecordId,
-            label: sourceLabel(row.sourceKind, row.documentKey),
-            matchedText: row.matchedText,
-          });
-          grouped.set(row.relatedIssueId, existing);
-        }
-
-        return [...grouped.values()]
-          .map((item) => ({ ...item, sources: [...item.sources].sort(sortSources) }))
-          .sort(sortRelatedWork);
-      };
-
-      return {
-        outbound: mapRows(outboundRows),
-        inbound: mapRows(inboundRows),
-      };
+    const issue = await issueById(issueId, dbOrTx);
+    if (!issue) throw notFound("Issue not found");
+    return (await listIssueReferenceSummaries(issue.companyId, [issueId], dbOrTx)).get(issueId) ?? emptySummary();
   }
 
   return {
@@ -400,6 +429,7 @@ export function issueReferenceService(db: Db) {
     deleteDocumentSource,
     syncAllForIssue,
     syncAllForCompany,
+    listIssueReferenceSummaries,
     listIssueReferenceSummary,
     diffIssueReferenceSummary: diffIssueSummaries,
     emptySummary,

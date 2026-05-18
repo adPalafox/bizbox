@@ -41,6 +41,7 @@ import {
   issueExecutionWorkspaceModeForPersistedWorkspace,
   parseProjectExecutionWorkspacePolicy,
 } from "./execution-workspace-policy.js";
+import { issueReferenceService } from "./issue-references.js";
 import { instanceSettingsService } from "./instance-settings.js";
 import { redactCurrentUserText } from "../log-redaction.js";
 import { resolveIssueGoalId, resolveNextIssueGoalId } from "./issue-goal-fallback.js";
@@ -97,6 +98,7 @@ export interface IssueFilters {
   originId?: string;
   includeRoutineExecutions?: boolean;
   excludeRoutineExecutions?: boolean;
+  includeRelatedWork?: boolean;
   q?: string;
   limit?: number;
 }
@@ -883,6 +885,7 @@ async function lastActivityStatsForIssues(
 
 export function issueService(db: Db) {
   const instanceSettings = instanceSettingsService(db);
+  const issueReferences = issueReferenceService(db);
 
   async function getIssueByUuid(id: string) {
     const row = await db
@@ -1541,20 +1544,26 @@ export function issueService(db: Db) {
       }
 
       const issueIds = withRuns.map((row) => row.id);
-      const [statsRows, readRows, lastActivityRows] = await Promise.all([
-        contextUserId
-          ? userCommentStatsForIssues(db, companyId, contextUserId, issueIds)
-          : Promise.resolve([]),
-        contextUserId
-          ? userReadStatsForIssues(db, companyId, contextUserId, issueIds)
-          : Promise.resolve([]),
-        lastActivityStatsForIssues(db, companyId, issueIds),
+      const [relatedWorkByIssueId, [statsRows, readRows, lastActivityRows]] = await Promise.all([
+        filters?.includeRelatedWork
+          ? issueReferences.listIssueReferenceSummaries(companyId, issueIds, db)
+          : Promise.resolve(null),
+        Promise.all([
+          contextUserId
+            ? userCommentStatsForIssues(db, companyId, contextUserId, issueIds)
+            : Promise.resolve([]),
+          contextUserId
+            ? userReadStatsForIssues(db, companyId, contextUserId, issueIds)
+            : Promise.resolve([]),
+          lastActivityStatsForIssues(db, companyId, issueIds),
+        ]),
       ]);
       const statsByIssueId = new Map(statsRows.map((row) => [row.issueId, row]));
       const lastActivityByIssueId = new Map(lastActivityRows.map((row) => [row.issueId, row]));
 
       if (!contextUserId) {
         return withRuns.map((row) => {
+          const relatedWork = relatedWorkByIssueId?.get(row.id) ?? null;
           const activity = lastActivityByIssueId.get(row.id);
           const lastActivityAt = latestIssueActivityAt(
             row.updatedAt,
@@ -1563,6 +1572,14 @@ export function issueService(db: Db) {
           ) ?? row.updatedAt;
           return {
             ...row,
+            ...(relatedWork
+              ? {
+                relatedWork,
+                referencedIssueIdentifiers: relatedWork.outbound
+                  .map((item) => item.issue.identifier)
+                  .filter((identifier): identifier is string => typeof identifier === "string" && identifier.length > 0),
+              }
+              : {}),
             lastActivityAt,
           };
         });
@@ -1571,6 +1588,7 @@ export function issueService(db: Db) {
       const readByIssueId = new Map(readRows.map((row) => [row.issueId, row.myLastReadAt]));
 
       return withRuns.map((row) => {
+        const relatedWork = relatedWorkByIssueId?.get(row.id) ?? null;
         const activity = lastActivityByIssueId.get(row.id);
         const lastActivityAt = latestIssueActivityAt(
           row.updatedAt,
@@ -1579,6 +1597,14 @@ export function issueService(db: Db) {
         ) ?? row.updatedAt;
         return {
           ...row,
+          ...(relatedWork
+            ? {
+              relatedWork,
+              referencedIssueIdentifiers: relatedWork.outbound
+                .map((item) => item.issue.identifier)
+                .filter((identifier): identifier is string => typeof identifier === "string" && identifier.length > 0),
+            }
+            : {}),
           lastActivityAt,
           ...deriveIssueUserContext(row, contextUserId, {
             myLastCommentAt: statsByIssueId.get(row.id)?.myLastCommentAt ?? null,

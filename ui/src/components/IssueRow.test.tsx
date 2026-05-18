@@ -179,6 +179,21 @@ describe("IssueRow", () => {
     });
   });
 
+  it("allows nested rows to opt out of issue prefetch seeding", () => {
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(<IssueRow issue={createIssue()} issuePrefetch={null} />);
+    });
+
+    const link = container.querySelector("[data-inbox-issue-link]") as HTMLAnchorElement | null;
+    expect(link?.getAttribute("data-issue-prefetch-id")).toBeNull();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("renders titleSuffix inline after the issue title", () => {
     const root = createRoot(container);
     const issue = createIssue({ title: "Parent task" });

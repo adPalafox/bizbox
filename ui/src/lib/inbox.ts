@@ -4,6 +4,7 @@ import type {
   HeartbeatRun,
   InboxDismissal,
   Issue,
+  IssueRelationIssueSummary,
   JoinRequest,
   PendingHumanInboxInteraction,
 } from "@paperclipai/shared";
@@ -100,7 +101,7 @@ export interface InboxGroupedSection {
   key: string;
   label: string | null;
   displayItems: InboxWorkItem[];
-  childrenByIssueId: Map<string, Issue[]>;
+  nestedByIssueId: Map<string, InboxNestedIssueRows>;
   searchSection: InboxSearchSection;
 }
 
@@ -108,8 +109,16 @@ export interface InboxKeyboardGroupSection {
   key: string;
   label?: string | null;
   displayItems: InboxWorkItem[];
-  childrenByIssueId: ReadonlyMap<string, Issue[]>;
+  nestedByIssueId: ReadonlyMap<string, InboxNestedIssueRows>;
 }
+
+export interface InboxNestedIssueRows {
+  children: Issue[];
+  outbound: IssueRelationIssueSummary[];
+  inbound: IssueRelationIssueSummary[];
+}
+
+export type InboxNestedIssueRowSection = "child" | "outbound" | "inbound";
 
 export type InboxKeyboardNavEntry =
   | {
@@ -125,8 +134,11 @@ export type InboxKeyboardNavEntry =
     }
   | {
       type: "child";
+      rowKey: string;
+      section: InboxNestedIssueRowSection;
+      parentIssueId: string;
       issueId: string;
-      issue: Issue;
+      issue: Issue | IssueRelationIssueSummary;
     };
 
 export interface InboxProjectWorkspaceLookup {
@@ -924,14 +936,14 @@ export function groupInboxWorkItems(
  * Groups parent-child issues in a flat InboxWorkItem list.
  *
  * - Children whose parent is also in the list are removed from the top level
- *   and stored in `childrenByIssueId`.
+ *   and stored in `nestedByIssueId`.
  * - The parent's sort timestamp becomes max(parent, children) so that a group
  *   with a recently-updated child floats to the top.
  * - If a parent is absent (e.g. archived), children remain as independent roots.
  */
 export function buildInboxNesting(items: InboxWorkItem[]): {
   displayItems: InboxWorkItem[];
-  childrenByIssueId: Map<string, Issue[]>;
+  nestedByIssueId: Map<string, InboxNestedIssueRows>;
 } {
   const issueItems: (InboxWorkItem & { kind: "issue" })[] = [];
   const nonIssueItems: InboxWorkItem[] = [];
@@ -941,29 +953,59 @@ export function buildInboxNesting(items: InboxWorkItem[]): {
   }
 
   const issueIdSet = new Set(issueItems.map((i) => i.issue.id));
-  const childrenByIssueId = new Map<string, Issue[]>();
+  const nestedByIssueId = new Map<string, InboxNestedIssueRows>();
   const childIds = new Set<string>();
+  const getNestedRows = (issueId: string): InboxNestedIssueRows => {
+    const existing = nestedByIssueId.get(issueId);
+    if (existing) return existing;
+    const created: InboxNestedIssueRows = { children: [], outbound: [], inbound: [] };
+    nestedByIssueId.set(issueId, created);
+    return created;
+  };
 
   for (const item of issueItems) {
     const { issue } = item;
     if (issue.parentId && issueIdSet.has(issue.parentId)) {
       childIds.add(issue.id);
-      const arr = childrenByIssueId.get(issue.parentId) ?? [];
-      arr.push(issue);
-      childrenByIssueId.set(issue.parentId, arr);
+      getNestedRows(issue.parentId).children.push(issue);
     }
   }
 
-  // Sort each child list by most recent activity
-  for (const children of childrenByIssueId.values()) {
-    children.sort(sortIssuesByMostRecentActivity);
+  for (const item of issueItems) {
+    const { issue } = item;
+    if (childIds.has(issue.id)) continue;
+    const hasRelatedWorkInput =
+      (issue.relatedWork?.outbound?.length ?? 0) > 0 || (issue.relatedWork?.inbound?.length ?? 0) > 0;
+    // Nested reference rows are section-scoped on purpose: when grouping splits
+    // two visible issues into different sections, we suppress the cross-group
+    // reference row instead of leaking it into the wrong section.
+    const outbound = (issue.relatedWork?.outbound ?? [])
+      .map((related) => related.issue)
+      .filter((relatedIssue) => issueIdSet.has(relatedIssue.id) && !childIds.has(relatedIssue.id));
+    const inbound = (issue.relatedWork?.inbound ?? [])
+      .map((related) => related.issue)
+      .filter((relatedIssue) => issueIdSet.has(relatedIssue.id) && !childIds.has(relatedIssue.id));
+    if (outbound.length === 0 && inbound.length === 0 && !nestedByIssueId.has(issue.id) && !hasRelatedWorkInput) {
+      continue;
+    }
+    const nestedRows = getNestedRows(issue.id);
+    // Contextual reference rows reuse IssueRelationIssueSummary slices. They
+    // only surface when the full Issue is already present elsewhere in the
+    // section, so future row renderers must not assume every Issue field here
+    // is fully populated.
+    nestedRows.outbound = outbound;
+    nestedRows.inbound = inbound;
+  }
+
+  for (const nestedRows of nestedByIssueId.values()) {
+    nestedRows.children.sort(sortIssuesByMostRecentActivity);
   }
 
   // Build root issue items with group-adjusted timestamps
   const rootIssueItems: InboxWorkItem[] = issueItems
     .filter((item) => !childIds.has(item.issue.id))
     .map((item) => {
-      const children = childrenByIssueId.get(item.issue.id);
+      const children = nestedByIssueId.get(item.issue.id)?.children;
       if (!children?.length) return item;
       const maxChildTs = Math.max(...children.map(issueLastActivityTimestamp));
       return { ...item, timestamp: Math.max(item.timestamp, maxChildTs) };
@@ -979,7 +1021,7 @@ export function buildInboxNesting(items: InboxWorkItem[]): {
     return 0;
   });
 
-  return { displayItems, childrenByIssueId };
+  return { displayItems, nestedByIssueId };
 }
 
 export function buildGroupedInboxSections(
@@ -995,13 +1037,13 @@ export function buildGroupedInboxSections(
   return groupInboxWorkItems(items, groupBy, workspaceGrouping).map((group) => {
     const nestedGroup = nestingEnabled && group.items.some((item) => item.kind === "issue")
       ? buildInboxNesting(group.items)
-      : { displayItems: group.items, childrenByIssueId: new Map<string, Issue[]>() };
+      : { displayItems: group.items, nestedByIssueId: new Map<string, InboxNestedIssueRows>() };
 
     return {
       key: `${keyPrefix}${group.key}`,
       label: group.label,
       displayItems: nestedGroup.displayItems,
-      childrenByIssueId: nestedGroup.childrenByIssueId,
+      nestedByIssueId: nestedGroup.nestedByIssueId,
       searchSection,
     };
   });
@@ -1043,14 +1085,43 @@ export function buildInboxKeyboardNavEntries(
 
       if (item.kind !== "issue") continue;
 
-      const children = group.childrenByIssueId.get(item.issue.id);
-      if (!children?.length || collapsedInboxParents.has(item.issue.id)) continue;
+      const nestedRows = group.nestedByIssueId.get(item.issue.id);
+      const hasNestedRows =
+        Boolean(nestedRows?.children.length)
+        || Boolean(nestedRows?.outbound.length)
+        || Boolean(nestedRows?.inbound.length);
+      if (!hasNestedRows || collapsedInboxParents.has(item.issue.id)) continue;
 
-      for (const child of children) {
+      for (const child of nestedRows?.children ?? []) {
         entries.push({
           type: "child",
+          rowKey: `child:${item.issue.id}:${child.id}`,
+          section: "child",
+          parentIssueId: item.issue.id,
           issueId: child.id,
           issue: child,
+        });
+      }
+
+      for (const relatedIssue of nestedRows?.outbound ?? []) {
+        entries.push({
+          type: "child",
+          rowKey: `outbound:${item.issue.id}:${relatedIssue.id}`,
+          section: "outbound",
+          parentIssueId: item.issue.id,
+          issueId: relatedIssue.id,
+          issue: relatedIssue,
+        });
+      }
+
+      for (const relatedIssue of nestedRows?.inbound ?? []) {
+        entries.push({
+          type: "child",
+          rowKey: `inbound:${item.issue.id}:${relatedIssue.id}`,
+          section: "inbound",
+          parentIssueId: item.issue.id,
+          issueId: relatedIssue.id,
+          issue: relatedIssue,
         });
       }
     }

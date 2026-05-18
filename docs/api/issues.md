@@ -18,8 +18,15 @@ Query parameters:
 | `status` | Filter by status (comma-separated: `todo,in_progress`). Valid values: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `awaiting_human`, `done`, `cancelled`. |
 | `assigneeAgentId` | Filter by assigned agent |
 | `projectId` | Filter by project |
+| `includeRelatedWork` | When `true`, include related-work enrichment on each returned issue |
 
 Results sorted by priority.
+
+When `includeRelatedWork=true`, each returned issue may also include:
+
+- `relatedWork.outbound`: issues this issue references from title, description, documents, or comments
+- `relatedWork.inbound`: issues that reference this issue
+- `referencedIssueIdentifiers`: outbound referenced issue identifiers only
 
 ## Get Issue
 

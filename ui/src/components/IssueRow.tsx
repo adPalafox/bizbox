@@ -14,6 +14,7 @@ type UnreadState = "hidden" | "visible" | "fading";
 
 interface IssueRowProps {
   issue: Issue;
+  issuePrefetch?: Issue | null;
   issueLinkState?: unknown;
   selected?: boolean;
   mobileLeading?: ReactNode;
@@ -32,6 +33,7 @@ interface IssueRowProps {
 
 export function IssueRow({
   issue,
+  issuePrefetch,
   issueLinkState,
   selected = false,
   mobileLeading,
@@ -59,7 +61,7 @@ export function IssueRow({
       to={createIssueDetailPath(issuePathId)}
       state={detailState}
       disableIssueQuicklook
-      issuePrefetch={issue}
+      issuePrefetch={issuePrefetch === undefined ? issue : issuePrefetch}
       data-inbox-issue-link
       onClickCapture={() => rememberIssueDetailLocationState(issuePathId, detailState)}
       className={cn(
