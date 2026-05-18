@@ -70,7 +70,7 @@ import {
 import {
   agentConfigurationDoc as clickUpAgentRefConfigurationDoc,
   models as clickUpAgentRefModels,
-} from "../../../packages/adapters/clickup-agent-ref/src/index.ts";
+} from "@paperclipai/adapter-clickup-agent-ref";
 import { listCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
