@@ -253,13 +253,13 @@ describe("IssueGraph page", () => {
     expect(container.textContent).toContain("Worked");
     expect(container.textContent).toContain("Execution plan");
     expect(container.textContent).toContain("CEO Strategic Brief");
-    expect(container.textContent).toContain("Requested by PAP-1");
+    expect(container.textContent).toContain("Part of PAP-1 pipeline");
     expect(container.querySelectorAll('[data-node-kind="issue"]').length).toBe(2);
     expect(container.querySelectorAll('[data-node-kind="agent"]').length).toBe(2);
     expect(container.querySelectorAll('[data-node-kind="deliverable"]').length).toBe(2);
     expect(container.querySelectorAll('[data-edge-kind="blocker"]').length).toBe(1);
     expect(container.querySelector('[data-node-kind="issue"][data-selected="true"]')?.textContent).toContain("Child issue");
-    expect(container.textContent?.match(/Requested by PAP-1/g)?.length).toBe(1);
+    expect(container.textContent?.match(/Part of PAP-1 pipeline/g)?.length).toBe(1);
     const edgePaths = Array.from(container.querySelectorAll("path[data-edge-kind]"));
     expect(edgePaths.every((path) => !(path.getAttribute("d") ?? "").includes("M 0 0"))).toBe(true);
     expect(setBreadcrumbsMock).toHaveBeenCalled();

@@ -343,7 +343,6 @@ export function IssueGraph() {
     if (!dragRef.current.active || event.touches.length !== 1) return;
     const touch = event.touches[0];
     if (!touch) return;
-    event.preventDefault();
     onPointerMove(touch.clientX, touch.clientY);
   }, [onPointerMove]);
 
@@ -570,7 +569,7 @@ export function IssueGraph() {
                   <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{deliverable.deliverableKind}</span>
                   {deliverable.originatingIssueId !== deliverable.issueId ? (
                     <span className="block truncate text-[10px] text-muted-foreground">
-                      Requested by {deliverable.originatingIssueIdentifier ?? deliverable.originatingIssueTitle}
+                      Part of {deliverable.originatingIssueIdentifier ?? deliverable.originatingIssueTitle} pipeline
                     </span>
                   ) : null}
                 </span>
