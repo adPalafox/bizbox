@@ -287,7 +287,7 @@ describeEmbeddedPostgres("issueReferenceService", () => {
     await refs.syncIssue(sourceIssueId);
     await refs.syncIssue(inboundSourceIssueId);
 
-    const summaries = await refs.listIssueReferenceSummaries([sourceIssueId, targetIssueId]);
+    const summaries = await refs.listIssueReferenceSummaries(companyId, [sourceIssueId, targetIssueId]);
 
     expect(summaries.get(sourceIssueId)?.outbound.map((item) => item.issue.identifier)).toEqual(["PAP-2"]);
     expect(summaries.get(targetIssueId)?.inbound.map((item) => item.issue.identifier)).toEqual(["PAP-1", "PAP-3"]);

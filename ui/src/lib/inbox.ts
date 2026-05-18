@@ -973,6 +973,7 @@ export function buildInboxNesting(items: InboxWorkItem[]): {
 
   for (const item of issueItems) {
     const { issue } = item;
+    if (childIds.has(issue.id)) continue;
     const nestedRows = getNestedRows(issue.id);
     nestedRows.outbound = (issue.relatedWork?.outbound ?? [])
       .map((related) => related.issue)

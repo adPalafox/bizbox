@@ -1546,7 +1546,7 @@ export function issueService(db: Db) {
       const issueIds = withRuns.map((row) => row.id);
       const [relatedWorkByIssueId, [statsRows, readRows, lastActivityRows]] = await Promise.all([
         filters?.includeRelatedWork
-          ? issueReferences.listIssueReferenceSummaries(issueIds, db)
+          ? issueReferences.listIssueReferenceSummaries(companyId, issueIds, db)
           : Promise.resolve(null),
         Promise.all([
           contextUserId
