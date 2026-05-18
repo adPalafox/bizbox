@@ -974,13 +974,27 @@ export function buildInboxNesting(items: InboxWorkItem[]): {
   for (const item of issueItems) {
     const { issue } = item;
     if (childIds.has(issue.id)) continue;
+    const hasRelatedWorkInput =
+      (issue.relatedWork?.outbound?.length ?? 0) > 0 || (issue.relatedWork?.inbound?.length ?? 0) > 0;
+    // Nested reference rows are section-scoped on purpose: when grouping splits
+    // two visible issues into different sections, we suppress the cross-group
+    // reference row instead of leaking it into the wrong section.
+    const outbound = (issue.relatedWork?.outbound ?? [])
+      .map((related) => related.issue)
+      .filter((relatedIssue) => issueIdSet.has(relatedIssue.id) && !childIds.has(relatedIssue.id));
+    const inbound = (issue.relatedWork?.inbound ?? [])
+      .map((related) => related.issue)
+      .filter((relatedIssue) => issueIdSet.has(relatedIssue.id) && !childIds.has(relatedIssue.id));
+    if (outbound.length === 0 && inbound.length === 0 && !nestedByIssueId.has(issue.id) && !hasRelatedWorkInput) {
+      continue;
+    }
     const nestedRows = getNestedRows(issue.id);
-    nestedRows.outbound = (issue.relatedWork?.outbound ?? [])
-      .map((related) => related.issue)
-      .filter((relatedIssue) => issueIdSet.has(relatedIssue.id) && !childIds.has(relatedIssue.id));
-    nestedRows.inbound = (issue.relatedWork?.inbound ?? [])
-      .map((related) => related.issue)
-      .filter((relatedIssue) => issueIdSet.has(relatedIssue.id) && !childIds.has(relatedIssue.id));
+    // Contextual reference rows reuse IssueRelationIssueSummary slices. They
+    // only surface when the full Issue is already present elsewhere in the
+    // section, so future row renderers must not assume every Issue field here
+    // is fully populated.
+    nestedRows.outbound = outbound;
+    nestedRows.inbound = inbound;
   }
 
   for (const nestedRows of nestedByIssueId.values()) {
