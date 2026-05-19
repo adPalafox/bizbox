@@ -121,6 +121,7 @@ function buildIssueLayout(graph: IssueGraphResponse) {
 
   const issueAgentRoles = new Map<string, { assigned: typeof graph.edges; participant: typeof graph.edges }>();
   const issueDeliverables = new Map<string, IssueGraphDeliverableNode[]>();
+  const deliverableById = new Map(graph.deliverables.map((deliverable) => [deliverable.id, deliverable]));
   for (const edge of graph.edges) {
     if (!edge.issueId) continue;
     if (edge.kind === "assigned-agent" || edge.kind === "participant-agent") {
@@ -131,7 +132,7 @@ function buildIssueLayout(graph: IssueGraphResponse) {
     }
     if (edge.kind === "issue-deliverable" && edge.deliverableId) {
       const current = issueDeliverables.get(edge.issueId) ?? [];
-      const deliverable = graph.deliverables.find((entry) => entry.id === edge.deliverableId);
+      const deliverable = deliverableById.get(edge.deliverableId);
       if (deliverable) current.push(deliverable);
       issueDeliverables.set(edge.issueId, current);
     }
