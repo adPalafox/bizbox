@@ -31,8 +31,14 @@ import {
   thematicBreakPlugin,
   type RealmPlugin,
 } from "@mdxeditor/editor";
-import { buildAgentMentionHref, buildProjectMentionHref, buildUserMentionHref } from "@paperclipai/shared";
-import { Boxes, User } from "lucide-react";
+import {
+  buildAgentMentionHref,
+  buildDeliverableReferenceHref,
+  buildIssueReferenceHref,
+  buildProjectMentionHref,
+  buildUserMentionHref,
+} from "@paperclipai/shared";
+import { Boxes, CircleDot, FileText, FolderKanban, User } from "lucide-react";
 import { AgentIcon } from "./AgentIconPicker";
 import { applyMentionChipDecoration, clearMentionChipDecoration, parseMentionChipHref } from "../lib/mention-chips";
 import { MentionAwareLinkNode, mentionAwareLinkNodeReplacement } from "../lib/mention-aware-link-node";
@@ -48,12 +54,19 @@ import { useEditorAutocomplete, type SkillCommandOption } from "../context/Edito
 export interface MentionOption {
   id: string;
   name: string;
-  kind?: "agent" | "project" | "user";
+  kind?: "agent" | "project" | "user" | "issue" | "deliverable";
+  searchText?: string;
   agentId?: string;
   agentIcon?: string | null;
   projectId?: string;
   projectColor?: string | null;
+  projectStatus?: string | null;
   userId?: string;
+  issueId?: string;
+  issueIdentifier?: string;
+  deliverableId?: string;
+  deliverableContextLabel?: string | null;
+  deliverableFilename?: string | null;
 }
 
 /* ---- Editor props ---- */
@@ -162,6 +175,8 @@ function isSafeMarkdownLinkUrl(url: string): boolean {
 interface MentionState {
   trigger: "mention" | "skill";
   marker: "@" | "/";
+  markerCount: number;
+  mentionKind: "agent" | "issue" | "deliverable" | "project" | null;
   query: string;
   top: number;
   left: number;
@@ -187,11 +202,18 @@ interface MentionMenuSize {
   height: number;
 }
 
-const MENTION_MENU_WIDTH = 188;
+const MENTION_MENU_WIDTH = 280;
 const MENTION_MENU_HEIGHT = 208;
 const MENTION_MENU_PADDING = 8;
 const MENTION_MENU_ROW_HEIGHT = 34;
-const MENTION_MENU_CHROME_HEIGHT = 8;
+const MENTION_MENU_SKILL_CHROME_HEIGHT = 28;
+const MENTION_MENU_MENTION_CHROME_HEIGHT = 58;
+const MENTION_DOMAIN_TABS = [
+  { kind: "agent", label: "Members" },
+  { kind: "issue", label: "Issues" },
+  { kind: "deliverable", label: "Deliverables" },
+  { kind: "project", label: "Projects" },
+] as const;
 
 const CODE_BLOCK_LANGUAGES: Record<string, string> = {
   txt: "Text",
@@ -224,17 +246,30 @@ const FALLBACK_CODE_BLOCK_DESCRIPTOR: CodeBlockEditorDescriptor = {
 export function findMentionMatch(
   text: string,
   offset: number,
-): Pick<MentionState, "trigger" | "marker" | "query" | "atPos" | "endPos"> | null {
+): Pick<MentionState, "trigger" | "marker" | "markerCount" | "mentionKind" | "query" | "atPos" | "endPos"> | null {
   let atPos = -1;
   let trigger: MentionState["trigger"] | null = null;
   let marker: MentionState["marker"] | null = null;
+  let markerCount = 0;
   for (let i = offset - 1; i >= 0; i--) {
     const ch = text[i];
     if (ch === "@" || ch === "/") {
-      if (i === 0 || /\s/.test(text[i - 1])) {
+      if (ch === "@") {
+        let start = i;
+        while (start > 0 && text[start - 1] === "@") {
+          start -= 1;
+        }
+        if (start === 0 || /\s/.test(text[start - 1])) {
+          atPos = start;
+          trigger = "mention";
+          marker = "@";
+          markerCount = i - start + 1;
+        }
+      } else if (i === 0 || /\s/.test(text[i - 1])) {
         atPos = i;
-        trigger = ch === "@" ? "mention" : "skill";
-        marker = ch;
+        trigger = "skill";
+        marker = "/";
+        markerCount = 1;
       }
       break;
     }
@@ -242,16 +277,28 @@ export function findMentionMatch(
   }
 
   if (atPos === -1) return null;
-  const query = text.slice(atPos + 1, offset);
+  const query = text.slice(atPos + markerCount, offset);
   if (trigger === "skill" && /\s/.test(query)) return null;
+  const mentionKind = trigger === "mention" ? resolveMentionKind(markerCount) : null;
+  if (trigger === "mention" && mentionKind === null) return null;
 
   return {
     trigger: trigger ?? "mention",
     marker: marker ?? "@",
+    markerCount,
+    mentionKind,
     query,
     atPos,
     endPos: offset,
   };
+}
+
+function resolveMentionKind(markerCount: number): MentionState["mentionKind"] {
+  if (markerCount <= 1) return "agent";
+  if (markerCount === 2) return "issue";
+  if (markerCount === 3) return "deliverable";
+  if (markerCount === 4) return "project";
+  return null;
 }
 
 function detectMention(container: HTMLElement): MentionState | null {
@@ -278,6 +325,8 @@ function detectMention(container: HTMLElement): MentionState | null {
   return {
     trigger: match.trigger,
     marker: match.marker,
+    markerCount: match.markerCount,
+    mentionKind: match.mentionKind,
     query: match.query,
     top: rect.bottom - containerRect.top,
     left: rect.left - containerRect.left,
@@ -324,13 +373,20 @@ export function computeMentionMenuPosition(
   };
 }
 
-function getMentionMenuSize(optionCount: number): MentionMenuSize {
+export function getMentionMenuSize(
+  optionCount: number,
+  trigger: "mention" | "skill" = "mention",
+): MentionMenuSize {
   const visibleRows = Math.max(1, Math.min(optionCount, 8));
+  const chromeHeight = trigger === "mention"
+    ? MENTION_MENU_MENTION_CHROME_HEIGHT
+    : MENTION_MENU_SKILL_CHROME_HEIGHT;
+
   return {
     width: MENTION_MENU_WIDTH,
     height: Math.min(
       MENTION_MENU_HEIGHT,
-      visibleRows * MENTION_MENU_ROW_HEIGHT + MENTION_MENU_CHROME_HEIGHT,
+      visibleRows * MENTION_MENU_ROW_HEIGHT + chromeHeight,
     ),
   };
 }
@@ -354,8 +410,14 @@ function isSelectionInsideCodeLikeElement(container: HTMLElement | null) {
 }
 
 function mentionMarkdown(option: MentionOption): string {
+  if (option.kind === "issue" && option.issueIdentifier) {
+    return `[${option.issueIdentifier}](${buildIssueReferenceHref(option.issueIdentifier)}) `;
+  }
+  if (option.kind === "deliverable" && option.deliverableId) {
+    return `[${option.name}](${buildDeliverableReferenceHref(option.deliverableId)}) `;
+  }
   if (option.kind === "project" && option.projectId) {
-    return `[@${option.name}](${buildProjectMentionHref(option.projectId, option.projectColor ?? null)}) `;
+    return `[${option.name}](${buildProjectMentionHref(option.projectId, option.projectColor ?? null)}) `;
   }
   if (option.kind === "user" && option.userId) {
     return `[@${option.name}](${buildUserMentionHref(option.userId)}) `;
@@ -383,12 +445,14 @@ export function shouldAcceptAutocompleteKey(
 }
 
 export function isSameAutocompleteSession(
-  left: Pick<MentionState, "trigger" | "marker" | "query" | "textNode" | "atPos" | "endPos"> | null,
-  right: Pick<MentionState, "trigger" | "marker" | "query" | "textNode" | "atPos" | "endPos"> | null,
+  left: Pick<MentionState, "trigger" | "marker" | "markerCount" | "mentionKind" | "query" | "textNode" | "atPos" | "endPos"> | null,
+  right: Pick<MentionState, "trigger" | "marker" | "markerCount" | "mentionKind" | "query" | "textNode" | "atPos" | "endPos"> | null,
 ): boolean {
   if (!left || !right) return false;
   return left.trigger === right.trigger
     && left.marker === right.marker
+    && left.markerCount === right.markerCount
+    && left.mentionKind === right.mentionKind
     && left.query === right.query
     && left.textNode === right.textNode
     && left.atPos === right.atPos
@@ -405,6 +469,12 @@ function autocompleteOptionMatchesLink(option: AutocompleteOption, href: string)
 
   if (option.kind === "project" && option.projectId) {
     return parsed.kind === "project" && parsed.projectId === option.projectId;
+  }
+  if (option.kind === "issue" && option.issueIdentifier) {
+    return parsed.kind === "issue" && parsed.identifier === option.issueIdentifier;
+  }
+  if (option.kind === "deliverable" && option.deliverableId) {
+    return parsed.kind === "deliverable" && parsed.deliverableId === option.deliverableId;
   }
   if (option.kind === "user" && option.userId) {
     return parsed.kind === "user" && parsed.userId === option.userId;
@@ -473,7 +543,7 @@ export function placeCaretAfterMentionAnchor(target: HTMLAnchorElement): boolean
 
 /** Replace the active autocomplete token in the markdown string with the selected token. */
 function applyMention(markdown: string, state: MentionState, option: AutocompleteOption): string {
-  const search = `${state.marker}${state.query}`;
+  const search = `${state.marker.repeat(state.markerCount)}${state.query}`;
   const replacement = autocompleteMarkdown(option);
   const idx = markdown.lastIndexOf(search);
   if (idx === -1) return markdown;
@@ -572,7 +642,37 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
         .slice(0, 8);
     }
     if (!mentions) return [];
-    return mentions.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 8);
+    const candidates = mentions.filter((mention) => {
+      switch (mentionState.mentionKind) {
+        case "agent":
+          return mention.kind === "agent" || mention.kind === "user";
+        case "issue":
+          return mention.kind === "issue";
+        case "deliverable":
+          return mention.kind === "deliverable";
+        case "project":
+          return mention.kind === "project";
+        default:
+          return false;
+      }
+    });
+    return candidates
+      .filter((mention) => {
+        if (!q) return true;
+        const haystack = [
+          mention.name,
+          mention.searchText,
+          mention.kind === "issue" ? mention.issueIdentifier : null,
+          mention.kind === "deliverable" ? mention.deliverableFilename : null,
+          mention.kind === "deliverable" ? mention.deliverableContextLabel : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(q);
+      })
+      .sort((left, right) => rankMentionOption(right, q) - rankMentionOption(left, q))
+      .slice(0, 8);
   }, [mentionState, mentions, slashCommands]);
 
   useImperativeHandle(forwardedRef, () => ({
@@ -704,7 +804,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
     }
   }, [editorValue]);
 
-  const decorateProjectMentions = useCallback(() => {
+  const decorateMentionChips = useCallback(() => {
     const editable = containerRef.current?.querySelector('[contenteditable="true"]');
     if (!editable) return;
     const links = editable.querySelectorAll("a");
@@ -725,12 +825,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
         continue;
       }
 
-      if (parsed.kind === "skill") {
-        applyMentionChipDecoration(link, parsed);
-        continue;
-      }
-
-      if (parsed.kind === "user" || parsed.kind === "issue") {
+      if (parsed.kind === "skill" || parsed.kind === "user" || parsed.kind === "issue" || parsed.kind === "deliverable") {
         applyMentionChipDecoration(link, parsed);
         continue;
       }
@@ -825,9 +920,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
   useEffect(() => {
     const editable = containerRef.current?.querySelector('[contenteditable="true"]');
     if (!editable) return;
-    decorateProjectMentions();
+    decorateMentionChips();
     const observer = new MutationObserver(() => {
-      decorateProjectMentions();
+      decorateMentionChips();
     });
     observer.observe(editable, {
       subtree: true,
@@ -835,7 +930,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
       characterData: true,
     });
     return () => observer.disconnect();
-  }, [decorateProjectMentions, value]);
+  }, [decorateMentionChips, value]);
 
   const selectMention = useCallback(
     (option: AutocompleteOption) => {
@@ -856,7 +951,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
         const editable = containerRef.current?.querySelector('[contenteditable="true"]');
         if (!(editable instanceof HTMLElement)) return;
 
-        decorateProjectMentions();
+        decorateMentionChips();
         editable.focus();
 
         const target = findClosestAutocompleteAnchor(editable, option, state);
@@ -877,7 +972,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
       setMentionState(null);
       return true;
     },
-    [decorateProjectMentions, onChange],
+    [decorateMentionChips, onChange],
   );
 
   const handleAutocompletePress = useCallback((
@@ -917,7 +1012,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
     ? computeMentionMenuPosition(
         mentionState,
         getMentionMenuViewport(),
-        getMentionMenuSize(filteredMentions.length),
+        getMentionMenuSize(filteredMentions.length, mentionState.trigger),
       )
     : null;
 
@@ -1121,16 +1216,42 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
       />
 
       {/* Mention dropdown — rendered via portal so it isn't clipped by overflow containers */}
-      {mentionActive && filteredMentions.length > 0 &&
+      {mentionActive && mentionMenuPosition &&
         createPortal(
           <div
-            className="fixed z-[9999] min-w-[180px] max-w-[calc(100vw-16px)] max-h-[200px] overflow-y-auto rounded-md border border-border bg-popover shadow-md"
+            className="fixed z-[9999] min-w-[280px] max-w-[calc(100vw-16px)] max-h-[240px] overflow-hidden rounded-md border border-border bg-popover shadow-md"
             style={{
-              top: Math.min(mentionState.viewportTop + 4, window.innerHeight - 208),
-              left: Math.max(8, Math.min(mentionState.viewportLeft, window.innerWidth - 188)),
+              top: mentionMenuPosition.top,
+              left: mentionMenuPosition.left,
             }}
           >
-            {filteredMentions.map((option, i) => (
+            <div className="border-b border-border">
+              {mentionState.trigger === "mention" ? (
+                <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5 text-xs text-muted-foreground">
+                  {MENTION_DOMAIN_TABS.map((tab) => (
+                    <div
+                      key={tab.kind}
+                      className={cn(
+                        "shrink-0 rounded-sm px-2 py-1",
+                        mentionState.mentionKind === tab.kind
+                          ? "bg-accent text-foreground"
+                          : "opacity-70",
+                      )}
+                    >
+                      {tab.label}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className={cn(
+                "px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground",
+                mentionState.trigger === "mention" && "border-t border-border",
+              )}>
+                {mentionPromptLabel(mentionState)}
+              </div>
+            </div>
+            <div className="max-h-[170px] overflow-y-auto">
+            {filteredMentions.length > 0 ? filteredMentions.map((option, i) => (
               <button
                 key={option.id}
                 type="button"
@@ -1150,11 +1271,12 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
               >
                 {option.kind === "skill" ? (
                   <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : option.kind === "issue" ? (
+                  <CircleDot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : option.kind === "deliverable" ? (
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 ) : option.kind === "project" && option.projectId ? (
-                  <span
-                    className="inline-flex h-2 w-2 rounded-full border border-border/50"
-                    style={{ backgroundColor: option.projectColor ?? "#64748b" }}
-                  />
+                  <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 ) : option.kind === "user" ? (
                   <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 ) : (
@@ -1163,10 +1285,31 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
                     className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
                   />
                 )}
-                <span>{option.kind === "skill" ? `/${option.slug}` : option.name}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate">
+                    {option.kind === "skill"
+                      ? `/${option.slug}`
+                      : option.kind === "issue" && option.issueIdentifier
+                        ? `${option.issueIdentifier} ${option.name}`
+                        : option.name}
+                  </div>
+                  {option.kind === "deliverable" && option.deliverableContextLabel ? (
+                    <div className="truncate text-[11px] text-muted-foreground">{option.deliverableContextLabel}</div>
+                  ) : null}
+                </div>
                 {option.kind === "project" && option.projectId && (
                   <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
                     Project
+                  </span>
+                )}
+                {option.kind === "issue" && (
+                  <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Issue
+                  </span>
+                )}
+                {option.kind === "deliverable" && (
+                  <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Deliverable
                   </span>
                 )}
                 {option.kind === "user" && (
@@ -1180,7 +1323,12 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
                   </span>
                 )}
               </button>
-            ))}
+            )) : (
+              <div className="px-3 py-2 text-sm text-muted-foreground">
+                {mentionEmptyStateLabel(mentionState)}
+              </div>
+            )}
+            </div>
           </div>,
           document.body,
         )}
@@ -1201,3 +1349,44 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
     </div>
   );
 });
+
+function rankMentionOption(option: MentionOption, query: string): number {
+  if (!query) return 0;
+  const normalized = query.toLowerCase();
+  if (option.kind === "issue") {
+    if (option.issueIdentifier?.toLowerCase().startsWith(normalized)) return 5;
+    if (option.issueIdentifier?.toLowerCase().includes(normalized)) return 4;
+    if (option.name.toLowerCase().includes(normalized)) return 3;
+    return 0;
+  }
+  if (option.kind === "deliverable") {
+    if (option.name.toLowerCase().includes(normalized)) return 4;
+    if (option.deliverableFilename?.toLowerCase().includes(normalized)) return 3;
+    if (option.deliverableContextLabel?.toLowerCase().includes(normalized)) return 2;
+    return 0;
+  }
+  if (option.name.toLowerCase().startsWith(normalized)) return 2;
+  if (option.name.toLowerCase().includes(normalized)) return 1;
+  return 0;
+}
+
+function mentionPromptLabel(state: MentionState): string {
+  if (state.trigger === "skill") return "Search skills";
+  switch (state.mentionKind) {
+    case "issue":
+      return "Search issues";
+    case "deliverable":
+      return "Search deliverables";
+    case "project":
+      return "Search projects";
+    case "agent":
+    default:
+      return "Search members";
+  }
+}
+
+function mentionEmptyStateLabel(state: MentionState): string {
+  return state.query.trim()
+    ? `No matches for "${state.query.trim()}".`
+    : `${mentionPromptLabel(state)}...`;
+}

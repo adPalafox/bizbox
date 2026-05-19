@@ -72,13 +72,62 @@ describe("company-members helpers", () => {
     const options = buildMarkdownMentionOptions({
       members: [activeMember({ principalId: "user-1", user: { id: "user-1", name: "Taylor", email: "taylor@example.com", image: null } })],
       agents: [{ id: "agent-1", name: "CodexCoder", status: "active", icon: "code" }],
+      issues: [{ id: "issue-1", identifier: "PAP-12", title: "Tighten wake context" }],
+      deliverables: [{
+        id: "deliverable-1",
+        title: "Final Report",
+        originalFilename: "report.pdf",
+        childIssue: { id: "issue-1", identifier: "PAP-12", title: "Tighten wake context", status: "done" },
+        rootIssue: null,
+      }],
       projects: [{ id: "project-1", name: "Paperclip App", color: "#336699" }],
     });
 
     expect(options).toEqual([
       { id: "user:user-1", name: "Taylor", kind: "user", userId: "user-1" },
       { id: "agent:agent-1", name: "CodexCoder", kind: "agent", agentId: "agent-1", agentIcon: "code" },
+      {
+        id: "issue:issue-1",
+        name: "Tighten wake context",
+        kind: "issue",
+        issueId: "issue-1",
+        issueIdentifier: "PAP-12",
+        searchText: "PAP-12 Tighten wake context",
+      },
+      {
+        id: "deliverable:deliverable-1",
+        name: "Final Report",
+        kind: "deliverable",
+        deliverableId: "deliverable-1",
+        deliverableContextLabel: "PAP-12 Tighten wake context",
+        deliverableFilename: "report.pdf",
+        searchText: "Final Report report.pdf PAP-12 Tighten wake context",
+      },
       { id: "project:project-1", name: "Paperclip App", kind: "project", projectId: "project-1", projectColor: "#336699" },
+    ]);
+  });
+
+  it("uses the issue title once when a deliverable context issue has no identifier", () => {
+    const options = buildMarkdownMentionOptions({
+      deliverables: [{
+        id: "deliverable-1",
+        title: "Final Report",
+        originalFilename: "report.pdf",
+        childIssue: { id: "issue-1", identifier: null, title: "Refactor auth", status: "done" },
+        rootIssue: null,
+      }],
+    });
+
+    expect(options).toEqual([
+      {
+        id: "deliverable:deliverable-1",
+        name: "Final Report",
+        kind: "deliverable",
+        deliverableId: "deliverable-1",
+        deliverableContextLabel: "Refactor auth",
+        deliverableFilename: "report.pdf",
+        searchText: "Final Report report.pdf Refactor auth",
+      },
     ]);
   });
 
@@ -101,5 +150,21 @@ describe("company-members helpers", () => {
     expect(buildMarkdownMentionOptions({ members: users })).toEqual([
       { id: "user:user-1", name: "Taylor", kind: "user", userId: "user-1" },
     ]);
+  });
+
+  it("skips malformed deliverables with no context issue", () => {
+    const malformedDeliverable = {
+      id: "deliverable-bad",
+      title: "Broken deliverable",
+      originalFilename: "broken.pdf",
+      childIssue: null,
+      rootIssue: null,
+    } as unknown as NonNullable<Parameters<typeof buildMarkdownMentionOptions>[0]["deliverables"]>[number];
+
+    const options = buildMarkdownMentionOptions({
+      deliverables: [malformedDeliverable],
+    });
+
+    expect(options).toEqual([]);
   });
 });

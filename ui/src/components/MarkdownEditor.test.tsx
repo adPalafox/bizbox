@@ -3,11 +3,17 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildProjectMentionHref, buildSkillMentionHref } from "@paperclipai/shared";
+import {
+  buildDeliverableReferenceHref,
+  buildIssueReferenceHref,
+  buildProjectMentionHref,
+  buildSkillMentionHref,
+} from "@paperclipai/shared";
 import {
   computeMentionMenuPosition,
   findClosestAutocompleteAnchor,
   findMentionMatch,
+  getMentionMenuSize,
   isSameAutocompleteSession,
   MarkdownEditor,
   placeCaretAfterMentionAnchor,
@@ -20,6 +26,20 @@ const mdxEditorMockState = vi.hoisted(() => ({
   emitMountSilentEmptyState: false,
   markdownValues: [] as string[],
   suppressHtmlProcessingValues: [] as boolean[],
+}));
+
+const editorAutocompleteMockState = vi.hoisted(() => ({
+  slashCommands: [] as Array<{
+    id: string;
+    kind: "skill";
+    skillId: string;
+    key: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    href: string;
+    aliases: string[];
+  }>,
 }));
 
 vi.mock("@mdxeditor/editor", async () => {
@@ -139,6 +159,12 @@ vi.mock("../lib/paste-normalization", () => ({
   pasteNormalizationPlugin: () => ({}),
 }));
 
+vi.mock("../context/EditorAutocompleteContext", () => ({
+  useEditorAutocomplete: () => ({
+    slashCommands: editorAutocompleteMockState.slashCommands,
+  }),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -156,6 +182,7 @@ describe("MarkdownEditor", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     originalRangeRect = Range.prototype.getBoundingClientRect;
+    editorAutocompleteMockState.slashCommands = [];
     Range.prototype.getBoundingClientRect = () => ({
       x: 32,
       y: 24,
@@ -327,7 +354,7 @@ describe("MarkdownEditor", () => {
       ),
     ).toEqual({
       top: 372,
-      left: 144,
+      left: 64,
     });
   });
 
@@ -339,7 +366,7 @@ describe("MarkdownEditor", () => {
       ),
     ).toEqual({
       top: 12,
-      left: 92,
+      left: 8,
     });
   });
 
@@ -347,8 +374,8 @@ describe("MarkdownEditor", () => {
     expect(
       computeMentionMenuPosition(
         { viewportTop: 160, viewportLeft: 120 },
-        { offsetLeft: 0, offsetTop: 0, width: 320, height: 220 },
-        { width: 188, height: 42 },
+        { offsetLeft: 0, offsetTop: 0, width: 420, height: 280 },
+        getMentionMenuSize(0, "mention"),
       ),
     ).toEqual({
       top: 164,
@@ -356,14 +383,58 @@ describe("MarkdownEditor", () => {
     });
   });
 
+  it("includes the mention header chrome when sizing empty-state menus", () => {
+    expect(getMentionMenuSize(0, "mention")).toEqual({
+      width: 280,
+      height: 92,
+    });
+    expect(getMentionMenuSize(0, "skill")).toEqual({
+      width: 280,
+      height: 62,
+    });
+  });
+
   it("keeps mention queries active across spaces", () => {
     expect(findMentionMatch("Ping @Paperclip App", "Ping @Paperclip App".length)).toEqual({
       trigger: "mention",
       marker: "@",
+      mentionKind: "agent",
+      markerCount: 1,
       query: "Paperclip App",
       atPos: 5,
       endPos: "Ping @Paperclip App".length,
     });
+  });
+
+  it("switches the mention domain based on repeated @ markers", () => {
+    expect(findMentionMatch("@@PAP", "@@PAP".length)).toEqual({
+      trigger: "mention",
+      marker: "@",
+      mentionKind: "issue",
+      markerCount: 2,
+      query: "PAP",
+      atPos: 0,
+      endPos: "@@PAP".length,
+    });
+    expect(findMentionMatch("@@@Final", "@@@Final".length)).toEqual({
+      trigger: "mention",
+      marker: "@",
+      mentionKind: "deliverable",
+      markerCount: 3,
+      query: "Final",
+      atPos: 0,
+      endPos: "@@@Final".length,
+    });
+    expect(findMentionMatch("@@@@Auth", "@@@@Auth".length)).toEqual({
+      trigger: "mention",
+      marker: "@",
+      mentionKind: "project",
+      markerCount: 4,
+      query: "Auth",
+      atPos: 0,
+      endPos: "@@@@Auth".length,
+    });
+    expect(findMentionMatch("@@@@@Nope", "@@@@@Nope".length)).toBeNull();
   });
 
   it("still rejects slash commands once spaces are typed", () => {
@@ -377,12 +448,65 @@ describe("MarkdownEditor", () => {
     expect(shouldAcceptAutocompleteKey("Tab", "skill")).toBe(true);
   });
 
+  it("does not render mention domain tabs for slash-command autocomplete", async () => {
+    editorAutocompleteMockState.slashCommands = [
+      {
+        id: "skill:skill-123",
+        kind: "skill",
+        skillId: "skill-123",
+        key: "agent-browser",
+        name: "Agent Browser",
+        slug: "agent-browser",
+        description: "Launch the browser skill",
+        href: buildSkillMentionHref("skill-123", "agent-browser"),
+        aliases: ["agent-browser", "Agent Browser"],
+      },
+    ];
+
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="/agent"
+          onChange={() => {}}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "/agent".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).not.toContain("Members");
+    expect(document.body.textContent).toContain("Search skills");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("keeps the same autocomplete session active while the slash query is unchanged", () => {
     const textNode = document.createTextNode("/agent");
     expect(isSameAutocompleteSession(
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent",
         textNode,
         atPos: 0,
@@ -391,6 +515,8 @@ describe("MarkdownEditor", () => {
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent",
         textNode,
         atPos: 0,
@@ -402,6 +528,8 @@ describe("MarkdownEditor", () => {
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent",
         textNode,
         atPos: 0,
@@ -410,6 +538,8 @@ describe("MarkdownEditor", () => {
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent-browser",
         textNode,
         atPos: 0,
@@ -467,7 +597,7 @@ describe("MarkdownEditor", () => {
     await act(async () => {
       root.render(
         <MarkdownEditor
-          value="@Pap"
+          value="@@@@Pap"
           onChange={handleChange}
           mentions={[
             {
@@ -492,7 +622,7 @@ describe("MarkdownEditor", () => {
 
     const selection = window.getSelection();
     const range = document.createRange();
-    range.setStart(textNode!, "@Pap".length);
+    range.setStart(textNode!, "@@@@Pap".length);
     range.collapse(true);
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -512,8 +642,225 @@ describe("MarkdownEditor", () => {
     });
 
     expect(handleChange).toHaveBeenCalledWith(
-      `[@Paperclip App](${buildProjectMentionHref("project-123", "#336699")}) `,
+      `[Paperclip App](${buildProjectMentionHref("project-123", "#336699")}) `,
     );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("includes human members in single-@ results", async () => {
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@Tay"
+          onChange={() => {}}
+          mentions={[
+            {
+              id: "user:user-123",
+              kind: "user",
+              name: "Taylor",
+              userId: "user-123",
+            },
+            {
+              id: "agent:agent-123",
+              kind: "agent",
+              name: "CodexCoder",
+              agentId: "agent-123",
+              agentIcon: "code",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@Tay".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).toContain("Members");
+    expect(document.body.textContent).toContain("Search members");
+    expect(document.body.textContent).toContain("Taylor");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens issue mode immediately for @@ and inserts a canonical issue link on selection", async () => {
+    const handleChange = vi.fn();
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@@"
+          onChange={handleChange}
+          mentions={[
+            {
+              id: "issue:issue-123",
+              kind: "issue",
+              name: "Tighten wake context",
+              issueId: "issue-123",
+              issueIdentifier: "PAP-123",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@@".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).toContain("Members");
+    expect(document.body.textContent).toContain("Search issues");
+    expect(document.body.textContent).toContain("Issues");
+    expect(document.body.textContent).toContain("Deliverables");
+    expect(document.body.textContent).toContain("Projects");
+    const option = Array.from(document.body.querySelectorAll('button[type="button"]'))
+      .find((node) => node.textContent?.includes("PAP-123"));
+    expect(option).toBeTruthy();
+
+    act(() => {
+      option?.dispatchEvent(new Event("touchstart", { bubbles: true, cancelable: true }));
+    });
+
+    expect(handleChange).toHaveBeenCalledWith(
+      `[PAP-123](${buildIssueReferenceHref("PAP-123")}) `,
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens deliverable mode immediately for @@@ and inserts a canonical deliverable link on selection", async () => {
+    const handleChange = vi.fn();
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@@@"
+          onChange={handleChange}
+          mentions={[
+            {
+              id: "deliverable:deliverable-123",
+              kind: "deliverable",
+              name: "Final Report",
+              deliverableId: "deliverable-123",
+              deliverableContextLabel: "PAP-9 Quarterly review",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@@@".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).toContain("Search deliverables");
+    const option = Array.from(document.body.querySelectorAll('button[type="button"]'))
+      .find((node) => node.textContent?.includes("Final Report"));
+    expect(option).toBeTruthy();
+
+    act(() => {
+      option?.dispatchEvent(new Event("touchstart", { bubbles: true, cancelable: true }));
+    });
+
+    expect(handleChange).toHaveBeenCalledWith(
+      `[Final Report](${buildDeliverableReferenceHref("deliverable-123")}) `,
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("closes the menu when five @ markers are typed", async () => {
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@@@@@"
+          onChange={() => {}}
+          mentions={[
+            {
+              id: "project:project-123",
+              kind: "project",
+              name: "Paperclip App",
+              projectId: "project-123",
+              projectColor: "#336699",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@@@@@".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).not.toContain("Search projects");
+    expect(document.body.textContent).not.toContain("Members");
 
     await act(async () => {
       root.unmount();

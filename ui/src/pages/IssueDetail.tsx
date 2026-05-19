@@ -11,6 +11,7 @@ import { instanceSettingsApi } from "../api/instanceSettings";
 import { accessApi } from "../api/access";
 import { agentsApi } from "../api/agents";
 import { authApi } from "../api/auth";
+import { deliverablesApi } from "../api/deliverables";
 import { projectsApi } from "../api/projects";
 import { useCompany } from "../context/CompanyContext";
 import { useDialog } from "../context/DialogContext";
@@ -1131,6 +1132,16 @@ export function IssueDetail() {
     queryFn: () => projectsApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId,
   });
+  const { data: issueOptions } = useQuery({
+    queryKey: selectedCompanyId ? ["issues", selectedCompanyId, "autocomplete", 200] : ["issues", "detail", "pending"],
+    queryFn: () => issuesApi.list(selectedCompanyId!, { limit: 200 }),
+    enabled: !!selectedCompanyId,
+  });
+  const { data: deliverableOptions } = useQuery({
+    queryKey: selectedCompanyId ? queryKeys.deliverables.list(selectedCompanyId, { limit: 200 }) : ["deliverables", "detail", "pending"],
+    queryFn: () => deliverablesApi.list(selectedCompanyId!, { limit: 200 }),
+    enabled: !!selectedCompanyId,
+  });
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
   const { data: feedbackVotes } = useQuery({
     queryKey: queryKeys.issues.feedbackVotes(issueId!),
@@ -1182,10 +1193,12 @@ export function IssueDetail() {
   const mentionOptions = useMemo<MentionOption[]>(() => {
     return buildMarkdownMentionOptions({
       agents,
+      issues: issueOptions,
+      deliverables: deliverableOptions?.items,
       projects: orderedProjects,
       members: companyMembers?.users,
     });
-  }, [agents, companyMembers?.users, orderedProjects]);
+  }, [agents, companyMembers?.users, deliverableOptions?.items, issueOptions, orderedProjects]);
 
   const resolvedProject = useMemo(
     () => (issue?.projectId ? orderedProjects.find((project) => project.id === issue.projectId) ?? issue.project ?? null : null),

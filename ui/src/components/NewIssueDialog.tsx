@@ -4,6 +4,7 @@ import { pickTextColorForSolidBg } from "@/lib/color-contrast";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
 import { executionWorkspacesApi } from "../api/execution-workspaces";
+import { deliverablesApi } from "../api/deliverables";
 import { issuesApi } from "../api/issues";
 import { instanceSettingsApi } from "../api/instanceSettings";
 import { projectsApi } from "../api/projects";
@@ -338,6 +339,16 @@ export function NewIssueDialog() {
     queryFn: () => projectsApi.list(effectiveCompanyId!),
     enabled: !!effectiveCompanyId && newIssueOpen,
   });
+  const { data: issueOptions } = useQuery({
+    queryKey: effectiveCompanyId ? ["issues", effectiveCompanyId, "autocomplete", 200] : ["issues", "new-issue", "pending"],
+    queryFn: () => issuesApi.list(effectiveCompanyId!, { limit: 200 }),
+    enabled: !!effectiveCompanyId && newIssueOpen,
+  });
+  const { data: deliverableOptions } = useQuery({
+    queryKey: effectiveCompanyId ? queryKeys.deliverables.list(effectiveCompanyId, { limit: 200 }) : ["deliverables", "new-issue", "pending"],
+    queryFn: () => deliverablesApi.list(effectiveCompanyId!, { limit: 200 }),
+    enabled: !!effectiveCompanyId && newIssueOpen,
+  });
   const { data: reusableExecutionWorkspaces } = useQuery({
     queryKey: queryKeys.executionWorkspaces.list(effectiveCompanyId!, {
       projectId,
@@ -389,10 +400,12 @@ export function NewIssueDialog() {
   const mentionOptions = useMemo<MentionOption[]>(() => {
     return buildMarkdownMentionOptions({
       agents,
+      issues: issueOptions,
+      deliverables: deliverableOptions?.items,
       projects: orderedProjects,
       members: companyMembers?.users,
     });
-  }, [agents, companyMembers?.users, orderedProjects]);
+  }, [agents, companyMembers?.users, deliverableOptions?.items, issueOptions, orderedProjects]);
 
   const { data: assigneeAdapterModels } = useQuery({
     queryKey:

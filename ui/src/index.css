@@ -502,14 +502,42 @@ a.paperclip-mention-chip::before {
 
 .paperclip-mdxeditor-content a.paperclip-mention-chip[data-mention-kind="project"]::before,
 a.paperclip-mention-chip[data-mention-kind="project"]::before {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 999px;
+  width: 0.75rem;
+  height: 0.75rem;
   background-color: var(--paperclip-mention-project-color, currentColor);
+  -webkit-mask-image: var(--paperclip-mention-icon-mask);
+  mask-image: var(--paperclip-mention-icon-mask);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
 .paperclip-mdxeditor-content a.paperclip-mention-chip[data-mention-kind="agent"]::before,
 a.paperclip-mention-chip[data-mention-kind="agent"]::before {
+  width: 0.75rem;
+  height: 0.75rem;
+  background-color: currentColor;
+  -webkit-mask-image: var(--paperclip-mention-icon-mask);
+  mask-image: var(--paperclip-mention-icon-mask);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.paperclip-mdxeditor-content a.paperclip-mention-chip[data-mention-kind="issue"]::before,
+.paperclip-mdxeditor-content a.paperclip-mention-chip[data-mention-kind="deliverable"]::before,
+.paperclip-mdxeditor-content a.paperclip-mention-chip[data-mention-kind="user"]::before,
+.paperclip-mdxeditor-content a.paperclip-mention-chip[data-mention-kind="skill"]::before,
+a.paperclip-mention-chip[data-mention-kind="issue"]::before,
+a.paperclip-mention-chip[data-mention-kind="deliverable"]::before,
+a.paperclip-mention-chip[data-mention-kind="user"]::before,
+a.paperclip-mention-chip[data-mention-kind="skill"]::before {
   width: 0.75rem;
   height: 0.75rem;
   background-color: currentColor;
