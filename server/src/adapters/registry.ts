@@ -67,10 +67,7 @@ import {
   execute as clickUpAgentRefExecute,
   testEnvironment as clickUpAgentRefTestEnvironment,
 } from "@paperclipai/adapter-clickup-agent-ref/server";
-import {
-  agentConfigurationDoc as clickUpAgentRefConfigurationDoc,
-  models as clickUpAgentRefModels,
-} from "@paperclipai/adapter-clickup-agent-ref";
+import * as clickUpAgentRefPackage from "@paperclipai/adapter-clickup-agent-ref";
 import { listCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
@@ -101,6 +98,45 @@ import { buildExternalAdapters } from "./plugin-loader.js";
 import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
+
+const resolvedClickUpAgentRefConfigurationDoc =
+  ("agentConfigurationDoc" in clickUpAgentRefPackage &&
+  typeof clickUpAgentRefPackage.agentConfigurationDoc === "string"
+    ? clickUpAgentRefPackage.agentConfigurationDoc
+    : "default" in clickUpAgentRefPackage &&
+        clickUpAgentRefPackage.default &&
+        typeof clickUpAgentRefPackage.default === "object" &&
+        "agentConfigurationDoc" in clickUpAgentRefPackage.default &&
+        typeof clickUpAgentRefPackage.default.agentConfigurationDoc === "string"
+      ? clickUpAgentRefPackage.default.agentConfigurationDoc
+      : null);
+
+if (resolvedClickUpAgentRefConfigurationDoc === null) {
+  console.warn(
+    "[registry] clickup_agent_ref: 'agentConfigurationDoc' export not found — ClickUp adapter will have no configuration documentation",
+  );
+}
+
+const clickUpAgentRefConfigurationDoc = resolvedClickUpAgentRefConfigurationDoc ?? "";
+
+const resolvedClickUpAgentRefModels =
+  ("models" in clickUpAgentRefPackage && Array.isArray(clickUpAgentRefPackage.models)
+    ? clickUpAgentRefPackage.models
+    : "default" in clickUpAgentRefPackage &&
+        clickUpAgentRefPackage.default &&
+        typeof clickUpAgentRefPackage.default === "object" &&
+        "models" in clickUpAgentRefPackage.default &&
+        Array.isArray(clickUpAgentRefPackage.default.models)
+      ? clickUpAgentRefPackage.default.models
+      : null) as Array<{ id: string; label: string }> | null;
+
+if (!resolvedClickUpAgentRefModels) {
+  console.warn(
+    "[registry] clickup_agent_ref: 'models' export not found — ClickUp adapter will have no model choices",
+  );
+}
+
+const clickUpAgentRefModels = resolvedClickUpAgentRefModels ?? [];
 
 function normalizeHermesConfig<T extends { config?: unknown; agent?: unknown }>(ctx: T): T {
   const config =

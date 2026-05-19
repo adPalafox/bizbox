@@ -376,7 +376,10 @@ export async function startServer(): Promise<StartedServer> {
           `Embedded PostgreSQL appears to already be reachable without a pid file; reusing existing server on configured port ${configuredPort}`,
         );
       } catch {
-        const detectedPort = await detectPort(configuredPort);
+        const detectedPort = await detectPort({
+          port: configuredPort,
+          hostname: "127.0.0.1",
+        });
         if (detectedPort !== configuredPort) {
           logger.warn(`Embedded PostgreSQL port is in use; using next free port (requestedPort=${configuredPort}, selectedPort=${detectedPort})`);
         }
@@ -517,7 +520,10 @@ export async function startServer(): Promise<StartedServer> {
     authReady = true;
   }
   
-  const listenPort = await detectPort(config.port);
+  const listenPort = await detectPort({
+    port: config.port,
+    hostname: config.host,
+  });
   if (listenPort !== config.port) {
     config.port = listenPort;
   }

@@ -104,6 +104,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   MoreVertical,
+  Network,
   Paperclip,
   Plus,
   Repeat,
@@ -2619,6 +2620,16 @@ export function IssueDetail() {
               <Button
                 variant="ghost"
                 size="icon-xs"
+                asChild
+                title="Open pipeline graph"
+              >
+                <Link to={`/issues/${issue.identifier ?? issue.id}/graph`}>
+                  <Network className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={copyIssueToClipboard}
                 title="Copy issue as markdown"
               >
@@ -2636,6 +2647,11 @@ export function IssueDetail() {
           )}
 
           <div className="hidden md:flex items-center md:ml-auto shrink-0">
+            <Button variant="ghost" size="icon-xs" asChild title="Open pipeline graph">
+              <Link to={`/issues/${issue.identifier ?? issue.id}/graph`}>
+                <Network className="h-4 w-4" />
+              </Link>
+            </Button>
             {canArchiveFromInbox && (
               <Button
                 variant="ghost"

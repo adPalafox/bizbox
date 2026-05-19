@@ -13,6 +13,7 @@ import { ProjectWorkspaceDetail } from "./pages/ProjectWorkspaceDetail";
 import { Workspaces } from "./pages/Workspaces";
 import { Issues } from "./pages/Issues";
 import { IssueDetail } from "./pages/IssueDetail";
+import { IssueGraph } from "./pages/IssueGraph";
 import { Deliverables } from "./pages/Deliverables";
 import { DeliverableDetail } from "./pages/DeliverableDetail";
 import { Routines } from "./pages/Routines";
@@ -101,6 +102,7 @@ function boardRoutes() {
       <Route path="issues/done" element={<Navigate to="/issues" replace />} />
       <Route path="issues/recent" element={<Navigate to="/issues" replace />} />
       <Route path="issues/:issueId" element={<IssueDetail />} />
+      <Route path="issues/:issueId/graph" element={<IssueGraph />} />
       <Route path="deliverables" element={<Deliverables />} />
       <Route path="deliverables/:deliverableId" element={<DeliverableDetail />} />
       <Route path="routines" element={<Routines />} />

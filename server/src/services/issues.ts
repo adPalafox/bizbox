@@ -18,13 +18,30 @@ import {
   issueComments,
   issueDocuments,
   issueReadStates,
+  issueWorkProducts,
   issues,
   labels,
   projectWorkspaces,
   projects,
 } from "@paperclipai/db";
-import type { IssueRelationIssueSummary } from "@paperclipai/shared";
-import { ISSUE_STATUSES, extractAgentMentionIds, extractProjectMentionIds, isUuidLike } from "@paperclipai/shared";
+import type {
+  IssueGraphAgentNode,
+  IssueGraphDeliverableNode,
+  IssueGraphEdge,
+  IssueGraphIssueNode,
+  IssueGraphParticipationRole,
+  IssueGraphResponse,
+  IssueRelationIssueSummary,
+} from "@paperclipai/shared";
+import {
+  ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY,
+  ISSUE_STATUSES,
+  extractAgentMentionIds,
+  extractProjectMentionIds,
+  isUuidLike,
+  normalizeAgentUrlKey,
+  parseIssueArtifactWorkProductMetadata,
+} from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import {
   clearIssueStatusCountsForCompany,
@@ -104,6 +121,14 @@ export interface IssueFilters {
 }
 
 type IssueRow = typeof issues.$inferSelect;
+
+function toRowArray<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && Array.isArray((result as { rows?: unknown[] }).rows)) {
+    return (result as { rows: T[] }).rows;
+  }
+  return [];
+}
 type IssueLabelRow = typeof labels.$inferSelect;
 type IssueActiveRunRow = {
   id: string;
@@ -154,6 +179,10 @@ type IssueRelationSummaryMap = {
   blockedBy: IssueRelationIssueSummary[];
   blocks: IssueRelationIssueSummary[];
 };
+type IssueGraphAgentRoleState = {
+  assigned: boolean;
+  participant: boolean;
+};
 export type IssueDependencyReadiness = {
   issueId: string;
   blockerIssueIds: string[];
@@ -182,6 +211,18 @@ function sameRunLock(checkoutRunId: string | null, actorRunId: string | null) {
 const TERMINAL_HEARTBEAT_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 const ISSUE_LIST_DESCRIPTION_MAX_CHARS = 1200;
 const ISSUE_LIST_DESCRIPTION_MAX_BYTES = ISSUE_LIST_DESCRIPTION_MAX_CHARS * 4;
+
+function issueGraphNodeId(issueId: string) {
+  return `issue:${issueId}`;
+}
+
+function agentGraphNodeId(agentId: string) {
+  return `agent:${agentId}`;
+}
+
+function deliverableGraphNodeId(deliverableId: string) {
+  return `deliverable:${deliverableId}`;
+}
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
@@ -907,6 +948,422 @@ export function issueService(db: Db) {
     if (!row) return null;
     const [enriched] = await withIssueLabels(db, [row]);
     return enriched;
+  }
+
+  async function getIssueByReference(raw: string) {
+    const id = raw.trim();
+    if (/^[A-Z]+-\d+$/i.test(id)) {
+      return getIssueByIdentifier(id);
+    }
+    if (!isUuidLike(id)) {
+      return null;
+    }
+    return getIssueByUuid(id);
+  }
+
+  async function getTopmostAncestorRow(issue: Pick<IssueRow, "companyId" | "id" | "parentId">): Promise<IssueRow> {
+    const rows = await db.execute<{ current_id: string; depth: number; has_cycle: boolean }>(sql`
+      WITH RECURSIVE ancestor_chain AS (
+        SELECT
+          i.id AS current_id,
+          i.parent_id,
+          ARRAY[i.id]::uuid[] AS visited_ids,
+          0 AS depth,
+          false AS has_cycle
+        FROM issues i
+        WHERE i.company_id = ${issue.companyId}
+          AND i.id = ${issue.id}
+
+        UNION ALL
+
+        SELECT
+          parent.id AS current_id,
+          parent.parent_id,
+          ancestor_chain.visited_ids || parent.id,
+          ancestor_chain.depth + 1,
+          parent.id = ANY(ancestor_chain.visited_ids) AS has_cycle
+        FROM ancestor_chain
+        JOIN issues parent
+          ON parent.company_id = ${issue.companyId}
+         AND parent.id = ancestor_chain.parent_id
+        WHERE ancestor_chain.parent_id IS NOT NULL
+          AND NOT ancestor_chain.has_cycle
+      )
+      SELECT ancestor_chain.current_id, ancestor_chain.depth, ancestor_chain.has_cycle
+      FROM ancestor_chain
+      ORDER BY ancestor_chain.depth DESC
+    `);
+
+    const chain = toRowArray<{ current_id: string; depth: number; has_cycle: boolean }>(rows);
+    if (chain.length === 0) throw notFound("Issue not found");
+    if (chain.some((row) => row.has_cycle)) {
+      throw conflict("Issue hierarchy contains a cycle");
+    }
+    const rootId = chain[0]?.current_id;
+    const root = await db
+      .select()
+      .from(issues)
+      .where(and(eq(issues.companyId, issue.companyId), eq(issues.id, rootId)))
+      .then((result) => result[0] ?? null);
+    if (!root) throw notFound("Issue not found");
+    return root;
+  }
+
+  async function listDescendantIssueRows(root: IssueRow): Promise<IssueRow[]> {
+    const rows = await db.execute<{ current_id: string; depth: number; has_cycle: boolean }>(sql`
+      WITH RECURSIVE descendants AS (
+        SELECT
+          i.id AS current_id,
+          ARRAY[i.id]::uuid[] AS visited_ids,
+          0 AS depth,
+          false AS has_cycle
+        FROM issues i
+        WHERE i.company_id = ${root.companyId}
+          AND i.id = ${root.id}
+
+        UNION ALL
+
+        SELECT
+          child.id AS current_id,
+          descendants.visited_ids || child.id,
+          descendants.depth + 1,
+          child.id = ANY(descendants.visited_ids) AS has_cycle
+        FROM descendants
+        JOIN issues child
+          ON child.company_id = ${root.companyId}
+         AND child.parent_id = descendants.current_id
+        WHERE NOT descendants.has_cycle
+      )
+      SELECT descendants.current_id, descendants.depth, descendants.has_cycle
+      FROM descendants
+      ORDER BY descendants.depth ASC
+    `);
+
+    const descendants = toRowArray<{ current_id: string; depth: number; has_cycle: boolean }>(rows);
+    if (descendants.some((row) => row.has_cycle)) {
+      throw conflict("Issue hierarchy contains a cycle");
+    }
+
+    const descendantIds = [...new Set(descendants.map((row) => row.current_id))];
+    if (descendantIds.length === 0) return [root];
+
+    const issueRows = await db
+      .select()
+      .from(issues)
+      .where(
+        and(
+          eq(issues.companyId, root.companyId),
+          inArray(issues.id, descendantIds),
+        ),
+      );
+
+    return issueRows;
+  }
+
+  async function buildIssueGraph(
+    input: string | Pick<IssueRow, "companyId" | "id" | "parentId">,
+  ): Promise<IssueGraphResponse | null> {
+    const selectedIssue =
+      typeof input === "string"
+        ? await getIssueByReference(input)
+        : input;
+    if (!selectedIssue) return null;
+
+    const rootRow = await getTopmostAncestorRow(selectedIssue);
+    const issueRows = await listDescendantIssueRows(rootRow);
+    const issueIds = issueRows.map((row) => row.id);
+    const issueIdSet = new Set(issueIds);
+
+    const assigneeAgentIds = [...new Set(issueRows.map((row) => row.assigneeAgentId).filter((value): value is string => !!value))];
+    const [relationMap, graphAgentRows, commentParticipantRows, activityParticipantRows, artifactRows, documentRows] =
+      await Promise.all([
+        getIssueRelationSummaryMap(rootRow.companyId, issueIds, db),
+        assigneeAgentIds.length > 0
+          ? db
+              .select({
+                id: agents.id,
+                companyId: agents.companyId,
+                name: agents.name,
+                role: agents.role,
+                icon: agents.icon,
+                status: agents.status,
+              })
+              .from(agents)
+              .where(and(eq(agents.companyId, rootRow.companyId), inArray(agents.id, assigneeAgentIds)))
+          : Promise.resolve([]),
+        db
+          .selectDistinct({
+            issueId: issueComments.issueId,
+            agentId: issueComments.authorAgentId,
+          })
+          .from(issueComments)
+          .where(
+            and(
+              eq(issueComments.companyId, rootRow.companyId),
+              inArray(issueComments.issueId, issueIds),
+              sql`${issueComments.authorAgentId} IS NOT NULL`,
+            ),
+          ),
+        db
+          .selectDistinct({
+            issueId: activityLog.entityId,
+            agentId: activityLog.agentId,
+          })
+          .from(activityLog)
+          .where(
+            and(
+              eq(activityLog.companyId, rootRow.companyId),
+              eq(activityLog.entityType, "issue"),
+              inArray(activityLog.entityId, issueIds),
+              sql`${activityLog.agentId} IS NOT NULL`,
+            ),
+          ),
+        db
+          .select()
+          .from(issueWorkProducts)
+          .where(
+            and(
+              eq(issueWorkProducts.companyId, rootRow.companyId),
+              inArray(issueWorkProducts.issueId, issueIds),
+              eq(issueWorkProducts.type, "artifact"),
+            ),
+          ),
+        db
+          .select({
+            id: issueDocuments.id,
+            companyId: issueDocuments.companyId,
+            issueId: issueDocuments.issueId,
+            key: issueDocuments.key,
+            audience: issueDocuments.audience,
+            title: documents.title,
+            format: documents.format,
+            createdAt: documents.createdAt,
+            updatedAt: documents.updatedAt,
+          })
+          .from(issueDocuments)
+          .innerJoin(documents, eq(issueDocuments.documentId, documents.id))
+          .where(
+            and(
+              eq(issueDocuments.companyId, rootRow.companyId),
+              inArray(issueDocuments.issueId, issueIds),
+              ne(issueDocuments.key, ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY),
+            ),
+          ),
+      ]);
+
+    const rolesByIssueId = new Map<string, Map<string, IssueGraphAgentRoleState>>();
+    const allAgentIds = new Set<string>();
+    const ensureRoleState = (issueId: string, agentId: string) => {
+      let byAgent = rolesByIssueId.get(issueId);
+      if (!byAgent) {
+        byAgent = new Map();
+        rolesByIssueId.set(issueId, byAgent);
+      }
+      let state = byAgent.get(agentId);
+      if (!state) {
+        state = { assigned: false, participant: false };
+        byAgent.set(agentId, state);
+      }
+      allAgentIds.add(agentId);
+      return state;
+    };
+
+    for (const row of issueRows) {
+      if (!row.assigneeAgentId) continue;
+      ensureRoleState(row.id, row.assigneeAgentId).assigned = true;
+    }
+    for (const row of commentParticipantRows) {
+      if (!row.agentId || !issueIdSet.has(row.issueId)) continue;
+      ensureRoleState(row.issueId, row.agentId).participant = true;
+    }
+    for (const row of activityParticipantRows) {
+      if (!row.agentId || !issueIdSet.has(row.issueId)) continue;
+      ensureRoleState(row.issueId, row.agentId).participant = true;
+    }
+
+    const missingAgentIds = [...allAgentIds].filter((agentId) => !graphAgentRows.some((row) => row.id === agentId));
+    const extraAgentRows =
+      missingAgentIds.length > 0
+        ? await db
+            .select({
+              id: agents.id,
+              companyId: agents.companyId,
+              name: agents.name,
+              role: agents.role,
+              icon: agents.icon,
+              status: agents.status,
+            })
+            .from(agents)
+            .where(and(eq(agents.companyId, rootRow.companyId), inArray(agents.id, missingAgentIds)))
+        : [];
+
+    const agentNodes: IssueGraphAgentNode[] = [...graphAgentRows, ...extraAgentRows].map((row) => ({
+      kind: "agent",
+      id: row.id,
+      companyId: row.companyId,
+      name: row.name,
+      urlKey: normalizeAgentUrlKey(row.name) ?? row.id,
+      role: row.role,
+      icon: row.icon,
+      status: row.status,
+    }));
+
+    const issueNodes: IssueGraphIssueNode[] = issueRows.map((row) => ({
+      kind: "issue",
+      id: row.id,
+      companyId: row.companyId,
+      identifier: row.identifier,
+      title: row.title,
+      status: row.status as IssueGraphIssueNode["status"],
+      priority: row.priority as IssueGraphIssueNode["priority"],
+      parentId: row.parentId,
+      assigneeAgentId: row.assigneeAgentId,
+      assigneeUserId: row.assigneeUserId,
+      projectId: row.projectId,
+      goalId: row.goalId,
+      startedAt: row.startedAt,
+      completedAt: row.completedAt,
+      cancelledAt: row.cancelledAt,
+      updatedAt: row.updatedAt,
+    }));
+
+    const deliverableNodes: IssueGraphDeliverableNode[] = [];
+    for (const row of artifactRows) {
+      const metadata = parseIssueArtifactWorkProductMetadata({
+        type: row.type as "artifact",
+        metadata: row.metadata,
+      });
+      deliverableNodes.push({
+        kind: "deliverable",
+        id: row.id,
+        companyId: row.companyId,
+        issueId: row.issueId,
+        pipelineRootIssueId: rootRow.id,
+        pipelineRootIssueIdentifier: rootRow.identifier,
+        pipelineRootIssueTitle: rootRow.title,
+        deliverableKind: "artifact",
+        title: row.title,
+        audience: row.audience as IssueGraphDeliverableNode["audience"],
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        artifactContentPath: metadata?.contentPath ?? null,
+        artifactContentType: metadata?.contentType ?? null,
+        artifactByteSize: metadata?.byteSize ?? null,
+        artifactOriginalFilename: metadata?.originalFilename ?? null,
+        documentKey: null,
+        documentFormat: null,
+      });
+    }
+    for (const row of documentRows) {
+      deliverableNodes.push({
+        kind: "deliverable",
+        id: row.id,
+        companyId: row.companyId,
+        issueId: row.issueId,
+        pipelineRootIssueId: rootRow.id,
+        pipelineRootIssueIdentifier: rootRow.identifier,
+        pipelineRootIssueTitle: rootRow.title,
+        deliverableKind: "document",
+        title: row.title?.trim() || row.key,
+        audience: row.audience as IssueGraphDeliverableNode["audience"],
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        artifactContentPath: null,
+        artifactContentType: null,
+        artifactByteSize: null,
+        artifactOriginalFilename: null,
+        documentKey: row.key,
+        documentFormat: row.format as IssueGraphDeliverableNode["documentFormat"],
+      });
+    }
+
+    const edgesById = new Map<string, IssueGraphEdge>();
+    const pushEdge = (edge: IssueGraphEdge) => {
+      if (!edgesById.has(edge.id)) {
+        edgesById.set(edge.id, edge);
+      }
+    };
+
+    for (const row of issueRows) {
+      if (row.parentId && issueIdSet.has(row.parentId)) {
+        pushEdge({
+          id: `hierarchy:${row.parentId}:${row.id}`,
+          kind: "hierarchy",
+          fromId: issueGraphNodeId(row.parentId),
+          toId: issueGraphNodeId(row.id),
+          issueId: row.id,
+          agentId: null,
+          deliverableId: null,
+        });
+      }
+    }
+
+    for (const row of issueRows) {
+      const relations = relationMap.get(row.id) ?? { blockedBy: [], blocks: [] };
+      for (const blocker of relations.blockedBy) {
+        if (!issueIdSet.has(blocker.id)) continue;
+        pushEdge({
+          id: `blocker:${blocker.id}:${row.id}`,
+          kind: "blocker",
+          fromId: issueGraphNodeId(blocker.id),
+          toId: issueGraphNodeId(row.id),
+          issueId: row.id,
+          agentId: null,
+          deliverableId: null,
+        });
+      }
+    }
+
+    for (const [issueId, byAgent] of rolesByIssueId.entries()) {
+      for (const [agentId, state] of byAgent.entries()) {
+        const participationRoles: IssueGraphParticipationRole[] = [];
+        if (state.assigned) participationRoles.push("assigned");
+        if (state.participant) participationRoles.push("participant");
+        for (const role of participationRoles) {
+          const kind = role === "assigned" ? "assigned-agent" : "participant-agent";
+          pushEdge({
+            id: `${kind}:${issueId}:${agentId}`,
+            kind,
+            fromId: issueGraphNodeId(issueId),
+            toId: agentGraphNodeId(agentId),
+            issueId,
+            agentId,
+            deliverableId: null,
+            participationRole: role,
+          });
+        }
+      }
+    }
+
+    for (const deliverable of deliverableNodes) {
+      pushEdge({
+        id: `issue-deliverable:${deliverable.issueId}:${deliverable.id}`,
+        kind: "issue-deliverable",
+        fromId: issueGraphNodeId(deliverable.issueId),
+        toId: deliverableGraphNodeId(deliverable.id),
+        issueId: deliverable.issueId,
+        agentId: null,
+        deliverableId: deliverable.id,
+      });
+    }
+
+    return {
+      rootIssueId: rootRow.id,
+      issues: issueNodes,
+      agents: agentNodes,
+      deliverables: deliverableNodes,
+      edges: [...edgesById.values()],
+    };
+  }
+
+  async function getGraph(input: string): Promise<IssueGraphResponse | null>;
+  async function getGraph(
+    input: Pick<IssueRow, "companyId" | "id" | "parentId">,
+  ): Promise<IssueGraphResponse>;
+  async function getGraph(
+    input: string | Pick<IssueRow, "companyId" | "id" | "parentId">,
+  ): Promise<IssueGraphResponse | null> {
+    return buildIssueGraph(input);
   }
 
   function redactIssueComment<T extends { body: string }>(comment: T, censorUsernameInLogs: boolean): T {
@@ -1709,19 +2166,14 @@ export function issueService(db: Db) {
     },
 
     getById: async (raw: string) => {
-      const id = raw.trim();
-      if (/^[A-Z]+-\d+$/i.test(id)) {
-        return getIssueByIdentifier(id);
-      }
-      if (!isUuidLike(id)) {
-        return null;
-      }
-      return getIssueByUuid(id);
+      return getIssueByReference(raw);
     },
 
     getByIdentifier: async (identifier: string) => {
       return getIssueByIdentifier(identifier);
     },
+
+    getGraph,
 
     getRelationSummaries: async (issueId: string) => {
       const issue = await db

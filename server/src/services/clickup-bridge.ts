@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { buildClickUpContextBody, buildCommentPayload } from "@paperclipai/adapter-clickup-agent-ref/server";
+import * as clickUpAgentRefServerPackage from "@paperclipai/adapter-clickup-agent-ref/server";
 import { agentThreads, agents, clickupBridges, clickupOutboundEvents } from "@paperclipai/db";
 import { parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { issueService } from "./issues.js";
@@ -16,6 +16,66 @@ const MAX_IMPORTED_IDS = 1000;
 const MIN_POLL_CLAIM_MS = 45_000;
 const STALE_OUTBOUND_PROCESSING_MS = 2 * 60 * 1000;
 const BRIDGE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+
+function resolveRequiredServerExport<T extends (...args: never[]) => unknown>(
+  exportName: string,
+): T {
+  const direct =
+    exportName in clickUpAgentRefServerPackage
+      ? clickUpAgentRefServerPackage[exportName as keyof typeof clickUpAgentRefServerPackage]
+      : undefined;
+  if (typeof direct === "function") {
+    return direct as unknown as T;
+  }
+  const fallback =
+    "default" in clickUpAgentRefServerPackage &&
+    clickUpAgentRefServerPackage.default &&
+    typeof clickUpAgentRefServerPackage.default === "object" &&
+    exportName in clickUpAgentRefServerPackage.default
+      ? clickUpAgentRefServerPackage.default[
+          exportName as keyof typeof clickUpAgentRefServerPackage.default
+        ]
+      : undefined;
+  if (typeof fallback === "function") {
+    return fallback as unknown as T;
+  }
+  throw new Error(`clickup_agent_ref server ${exportName} export is unavailable`);
+}
+
+type ClickUpCommentPayloadConfig = Parameters<
+  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
+>[1];
+type ClickUpContextBodyConfig = Parameters<
+  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
+>[1];
+
+let cachedBuildClickUpContextBody:
+  | typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
+  | null = null;
+let cachedBuildCommentPayload:
+  | typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
+  | null = null;
+
+function getBuildClickUpContextBody() {
+  if (!cachedBuildClickUpContextBody) {
+    cachedBuildClickUpContextBody = resolveRequiredServerExport<
+      typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
+    >("buildClickUpContextBody");
+  }
+  return cachedBuildClickUpContextBody;
+}
+
+function getBuildCommentPayload() {
+  if (!cachedBuildCommentPayload) {
+    cachedBuildCommentPayload = resolveRequiredServerExport<
+      typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
+    >("buildCommentPayload");
+  }
+  return cachedBuildCommentPayload;
+}
+
+const buildClickUpContextBody = getBuildClickUpContextBody();
+const buildCommentPayload = getBuildCommentPayload();
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -128,7 +188,7 @@ function buildBridgeCommentPayload(
   body: string,
   cfg: ReturnType<typeof resolveConfig>,
 ): Record<string, unknown> {
-  const adapterConfig: Parameters<typeof buildCommentPayload>[1] = {
+  const adapterConfig: ClickUpCommentPayloadConfig = {
     apiBaseUrl: cfg.apiBaseUrl,
     authToken: cfg.authToken,
     workspaceId: "bridge",
@@ -331,11 +391,12 @@ export function clickupBridgeService(db: Db) {
       const source = resolveBridgeSource(input.context);
       const cfg = resolveConfig(input.config);
       const taskName = buildTaskName(input.context, source.taskKey);
-      const body = buildClickUpContextBody(input.context, {
+      const contextConfig: ClickUpContextBodyConfig = {
         clickupAgentName: cfg.clickupAgentName,
         clickupAgentUrl: cfg.clickupAgentUrl,
         includeContextJson: cfg.includeContextJson,
-      });
+      };
+      const body = buildClickUpContextBody(input.context, contextConfig);
       const now = new Date();
       const [upsertedBridge] = await db
         .insert(clickupBridges)

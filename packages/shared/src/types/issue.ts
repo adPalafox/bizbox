@@ -275,6 +275,85 @@ export interface IssueComment {
   updatedAt: Date;
 }
 
+export type IssueGraphDeliverableKind = "artifact" | "document";
+export type IssueGraphEdgeKind =
+  | "hierarchy"
+  | "blocker"
+  | "assigned-agent"
+  | "participant-agent"
+  | "issue-deliverable";
+export type IssueGraphParticipationRole = "assigned" | "participant";
+
+export interface IssueGraphAgentNode {
+  kind: "agent";
+  id: string;
+  companyId: string;
+  name: string;
+  urlKey: string;
+  role: string;
+  icon: string | null;
+  status: string;
+}
+
+export interface IssueGraphIssueNode {
+  kind: "issue";
+  id: string;
+  companyId: string;
+  identifier: string | null;
+  title: string;
+  status: IssueStatus;
+  priority: IssuePriority;
+  parentId: string | null;
+  assigneeAgentId: string | null;
+  assigneeUserId: string | null;
+  projectId: string | null;
+  goalId: string | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  cancelledAt: Date | null;
+  updatedAt: Date;
+}
+
+export interface IssueGraphDeliverableNode {
+  kind: "deliverable";
+  id: string;
+  companyId: string;
+  issueId: string;
+  pipelineRootIssueId: string;
+  pipelineRootIssueIdentifier: string | null;
+  pipelineRootIssueTitle: string;
+  deliverableKind: IssueGraphDeliverableKind;
+  title: string;
+  audience: DeliverableAudience;
+  createdAt: Date;
+  updatedAt: Date;
+  artifactContentPath: string | null;
+  artifactContentType: string | null;
+  artifactByteSize: number | null;
+  artifactOriginalFilename: string | null;
+  documentKey: string | null;
+  documentFormat: DocumentFormat | null;
+}
+
+export interface IssueGraphEdge {
+  id: string;
+  kind: IssueGraphEdgeKind;
+  fromId: string;
+  toId: string;
+  issueId: string | null;
+  agentId: string | null;
+  deliverableId: string | null;
+  participationRole?: IssueGraphParticipationRole;
+}
+
+export interface IssueGraphResponse {
+  rootIssueId: string;
+  issues: IssueGraphIssueNode[];
+  agents: IssueGraphAgentNode[];
+  deliverables: IssueGraphDeliverableNode[];
+  edges: IssueGraphEdge[];
+}
+
 export interface PendingHumanInboxInteractionIssue {
   id: string;
   identifier: string | null;
