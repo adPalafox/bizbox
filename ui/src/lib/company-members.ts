@@ -104,14 +104,14 @@ export function buildMarkdownMentionOptions(args: {
         agentIcon: agent.icon,
       })),
     ...[...(args.issues ?? [])]
-      .filter((issue) => Boolean(issue.identifier))
+      .filter((issue): issue is Pick<Issue, "id" | "identifier" | "title"> & { identifier: string } => Boolean(issue.identifier))
       .sort((left, right) => (left.identifier ?? left.title).localeCompare(right.identifier ?? right.title))
       .map((issue) => ({
         id: `issue:${issue.id}`,
         name: issue.title,
         kind: "issue" as const,
         issueId: issue.id,
-        issueIdentifier: issue.identifier ?? issue.id,
+        issueIdentifier: issue.identifier,
         searchText: [issue.identifier, issue.title].filter(Boolean).join(" "),
       })),
     ...[...(args.deliverables ?? [])]
