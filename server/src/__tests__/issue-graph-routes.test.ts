@@ -173,14 +173,6 @@ describe("issue graph routes", () => {
   });
 
   it("rejects graph access outside the actor's company scope", async () => {
-    mockIssueService.getByIdentifier.mockResolvedValue({
-      id: "issue-root",
-      companyId: "company-2",
-      parentId: null,
-      title: "Root issue",
-      status: "todo",
-      priority: "medium",
-    });
     mockIssueService.getById.mockResolvedValue({
       id: "issue-root",
       companyId: "company-2",

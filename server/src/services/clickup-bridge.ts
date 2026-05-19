@@ -74,6 +74,9 @@ function getBuildCommentPayload() {
   return cachedBuildCommentPayload;
 }
 
+const buildClickUpContextBody = getBuildClickUpContextBody();
+const buildCommentPayload = getBuildCommentPayload();
+
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
@@ -200,7 +203,7 @@ function buildBridgeCommentPayload(
     includeContextJson: cfg.includeContextJson,
     timeoutSec: cfg.timeoutSec,
   };
-  return getBuildCommentPayload()(body, adapterConfig);
+  return buildCommentPayload(body, adapterConfig);
 }
 
 function appendImportedId(existing: unknown, id: string): string[] {
@@ -393,7 +396,7 @@ export function clickupBridgeService(db: Db) {
         clickupAgentUrl: cfg.clickupAgentUrl,
         includeContextJson: cfg.includeContextJson,
       };
-      const body = getBuildClickUpContextBody()(input.context, contextConfig);
+      const body = buildClickUpContextBody(input.context, contextConfig);
       const now = new Date();
       const [upsertedBridge] = await db
         .insert(clickupBridges)
