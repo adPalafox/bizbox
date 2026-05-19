@@ -1,4 +1,4 @@
-import { type TouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type TouchEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { type IssueGraphDeliverableNode, type IssueGraphResponse } from "@paperclipai/shared";
 import { Activity, ArrowRight, Boxes, Download, FileText, GitBranch, Network, ZoomIn, ZoomOut } from "lucide-react";
@@ -177,11 +177,14 @@ function buildIssueLayout(graph: IssueGraphResponse) {
     if (visited.has(issueId)) return;
     visited.add(issueId);
     const depth = depthMap.get(issueId) ?? 0;
+    const footprintHeight = issueFootprintHeight(issueId);
+    const subtreeHeight = subtreeHeights.get(issueId) ?? footprintHeight;
+    const centeredY = startY + Math.max(0, (subtreeHeight - footprintHeight) / 2);
     issueRects.set(issueId, {
       id: issueId,
       nodeId: issueNodeId(issueId),
       x: PADDING_X + depth * COL_GAP,
-      y: PADDING_Y + startY,
+      y: PADDING_Y + centeredY,
       width: ISSUE_W,
       height: ISSUE_H,
     });
@@ -265,6 +268,7 @@ export function IssueGraph() {
   const { issueId } = useParams<{ issueId: string }>();
   const { setBreadcrumbs } = useBreadcrumbs();
   const navigate = useNavigate();
+  const blockerMarkerId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -438,7 +442,7 @@ export function IssueGraph() {
         >
           <svg width={layout.bounds.width} height={layout.bounds.height} className="absolute inset-0 overflow-visible">
             <defs>
-              <marker id="issue-graph-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <marker id={blockerMarkerId} markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
                 <path d="M0 0 L10 5 L0 10 z" className="fill-muted-foreground/60" />
               </marker>
             </defs>
@@ -485,7 +489,7 @@ export function IssueGraph() {
                   fill="none"
                   strokeWidth={edge.kind === "hierarchy" ? 2.5 : 1.8}
                   strokeDasharray={dashArray}
-                  markerEnd={edge.kind === "blocker" ? "url(#issue-graph-arrow)" : undefined}
+                  markerEnd={edge.kind === "blocker" ? `url(#${blockerMarkerId})` : undefined}
                   className={strokeClass}
                   data-edge-kind={edge.kind}
                 />
