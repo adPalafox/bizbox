@@ -230,13 +230,14 @@ describe("IssueGraph page", () => {
   it("renders a rooted pipeline while preserving the selected issue as the operator entry point", async () => {
     getGraphMock.mockResolvedValue(sampleGraph());
 
-    root = createRoot(container);
+    const rootInstance = createRoot(container);
+    root = rootInstance;
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
 
     await act(async () => {
-      root.render(
+      rootInstance.render(
         <QueryClientProvider client={queryClient}>
           <IssueGraph />
         </QueryClientProvider>,
@@ -308,13 +309,14 @@ describe("IssueGraph page", () => {
     currentIssueId = "PAP-1";
     getGraphMock.mockResolvedValue(sampleGraph());
 
-    root = createRoot(container);
+    const rootInstance = createRoot(container);
+    root = rootInstance;
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
 
     await act(async () => {
-      root.render(
+      rootInstance.render(
         <QueryClientProvider client={queryClient}>
           <IssueGraph />
         </QueryClientProvider>,
