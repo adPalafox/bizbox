@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildAgentMentionHref,
+  buildDeliverableReferenceHref,
   buildIssueReferenceHref,
   buildProjectMentionHref,
   buildSkillMentionHref,
@@ -87,12 +88,12 @@ describe("MarkdownBody", () => {
     expect(html).toContain('alt="Org chart"');
   });
 
-  it("renders user, agent, project, and skill mentions as chips", () => {
+  it("renders user, agent, deliverable, project, and skill mentions as chips", () => {
     const html = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
         <ThemeProvider>
           <MarkdownBody>
-            {`[@Taylor](${buildUserMentionHref("user-123")}) [@CodexCoder](${buildAgentMentionHref("agent-123", "code")}) [@Paperclip App](${buildProjectMentionHref("project-456", "#336699")}) [/release-changelog](${buildSkillMentionHref("skill-789", "release-changelog")})`}
+            {`[@Taylor](${buildUserMentionHref("user-123")}) [@CodexCoder](${buildAgentMentionHref("agent-123", "code")}) [@@@Final Report](${buildDeliverableReferenceHref("deliverable-999")}) [@Paperclip App](${buildProjectMentionHref("project-456", "#336699")}) [/release-changelog](${buildSkillMentionHref("skill-789", "release-changelog")})`}
           </MarkdownBody>
         </ThemeProvider>
       </QueryClientProvider>,
@@ -103,6 +104,8 @@ describe("MarkdownBody", () => {
     expect(html).toContain('href="/agents/agent-123"');
     expect(html).toContain('data-mention-kind="agent"');
     expect(html).toContain("--paperclip-mention-icon-mask");
+    expect(html).toContain('href="/deliverables/deliverable-999"');
+    expect(html).toContain('data-mention-kind="deliverable"');
     expect(html).toContain('href="/projects/project-456"');
     expect(html).toContain('data-mention-kind="project"');
     expect(html).toContain("--paperclip-mention-project-color:#336699");

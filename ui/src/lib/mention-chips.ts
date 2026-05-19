@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import {
   parseAgentMentionHref,
+  parseDeliverableReferenceHref,
   parseIssueReferenceHref,
   parseProjectMentionHref,
   parseSkillMentionHref,
@@ -18,6 +19,10 @@ export type ParsedMentionChip =
   | {
       kind: "issue";
       identifier: string;
+    }
+  | {
+      kind: "deliverable";
+      deliverableId: string;
     }
   | {
       kind: "project";
@@ -42,6 +47,14 @@ export function parseMentionChipHref(href: string): ParsedMentionChip | null {
     return {
       kind: "issue",
       identifier: issue.identifier,
+    };
+  }
+
+  const deliverable = parseDeliverableReferenceHref(href);
+  if (deliverable) {
+    return {
+      kind: "deliverable",
+      deliverableId: deliverable.deliverableId,
     };
   }
 
@@ -92,11 +105,11 @@ export function mentionChipInlineStyle(mention: ParsedMentionChip): CSSPropertie
     style["--paperclip-mention-project-color"] = mention.color;
   }
 
-  if (mention.kind === "agent") {
-    const iconMask = buildAgentIconMask(mention.icon);
-    if (iconMask) {
-      style["--paperclip-mention-icon-mask"] = iconMask;
-    }
+  const iconMask = mention.kind === "agent"
+    ? buildAgentIconMask(mention.icon)
+    : buildMentionKindIconMask(mention.kind);
+  if (iconMask) {
+    style["--paperclip-mention-icon-mask"] = iconMask;
   }
 
   return Object.keys(style).length > 0 ? (style as CSSProperties) : undefined;
@@ -130,6 +143,7 @@ export function clearMentionChipDecoration(element: HTMLElement) {
     "paperclip-mention-chip",
     "paperclip-mention-chip--agent",
     "paperclip-mention-chip--issue",
+    "paperclip-mention-chip--deliverable",
     "paperclip-mention-chip--project",
     "paperclip-mention-chip--user",
     "paperclip-mention-chip--skill",
@@ -178,6 +192,30 @@ function buildAgentIconMask(iconName: string | null): string | null {
   iconMaskCache.set(cacheKey, url);
   return url;
 }
+
+function buildMentionKindIconMask(kind: Exclude<ParsedMentionChip["kind"], "agent">): string | null {
+  const cacheKey = `kind:${kind}`;
+  const cached = iconMaskCache.get(cacheKey);
+  if (cached) return cached;
+
+  const body = mentionKindIconSvg[kind];
+  if (!body) return null;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" ` +
+    `fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" ` +
+    `stroke-linejoin="round">${body}</svg>`;
+  const url = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  iconMaskCache.set(cacheKey, url);
+  return url;
+}
+
+const mentionKindIconSvg: Record<Exclude<ParsedMentionChip["kind"], "agent">, string> = {
+  issue: '<circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle>',
+  deliverable: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path><path d="M10 9H8"></path>',
+  project: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h5.379a1.5 1.5 0 0 1 1.06.44l1.121 1.12A1.5 1.5 0 0 0 13.121 8H19.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"></path>',
+  user: '<path d="M19 21a7 7 0 0 0-14 0"></path><circle cx="12" cy="8" r="4"></circle>',
+  skill: '<path d="M3 7l9-4 9 4-9 4z"></path><path d="M3 17l9 4 9-4"></path><path d="M3 12l9 4 9-4"></path>',
+};
 
 function resolveLucideIconNode(
   icon: unknown,

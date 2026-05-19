@@ -1,7 +1,7 @@
 import type { CompanyMember, CompanyUserDirectoryEntry } from "@/api/access";
 import type { InlineEntityOption } from "@/components/InlineEntitySelector";
 import type { MentionOption } from "@/components/MarkdownEditor";
-import type { Agent, Project } from "@paperclipai/shared";
+import type { Agent, DeliverableListItem, Issue, Project } from "@paperclipai/shared";
 
 export interface CompanyUserProfile {
   label: string;
@@ -86,11 +86,14 @@ export function buildCompanyUserMentionOptions(
 
 export function buildMarkdownMentionOptions(args: {
   agents?: Array<Pick<Agent, "id" | "name" | "status" | "icon">> | null | undefined;
+  issues?: Array<Pick<Issue, "id" | "identifier" | "title">> | null | undefined;
+  deliverables?: Array<Pick<DeliverableListItem, "id" | "title" | "originalFilename" | "childIssue" | "rootIssue">> | null | undefined;
   projects?: Array<Pick<Project, "id" | "name" | "color">> | null | undefined;
   members?: CompanyUserRecord[] | null | undefined;
+  includeUsers?: boolean;
 }): MentionOption[] {
   const options: MentionOption[] = [
-    ...buildCompanyUserMentionOptions(args.members),
+    ...(args.includeUsers ? buildCompanyUserMentionOptions(args.members) : []),
     ...[...(args.agents ?? [])]
       .filter((agent) => agent.status !== "terminated")
       .sort((left, right) => left.name.localeCompare(right.name))
@@ -101,6 +104,39 @@ export function buildMarkdownMentionOptions(args: {
         agentId: agent.id,
         agentIcon: agent.icon,
       })),
+    ...[...(args.issues ?? [])]
+      .filter((issue) => Boolean(issue.identifier))
+      .sort((left, right) => (left.identifier ?? left.title).localeCompare(right.identifier ?? right.title))
+      .map((issue) => ({
+        id: `issue:${issue.id}`,
+        name: issue.title,
+        kind: "issue" as const,
+        issueId: issue.id,
+        issueIdentifier: issue.identifier ?? issue.id,
+        searchText: [issue.identifier, issue.title].filter(Boolean).join(" "),
+      })),
+    ...[...(args.deliverables ?? [])]
+      .sort((left, right) => left.title.localeCompare(right.title))
+      .map((deliverable) => {
+        const contextIssue = deliverable.rootIssue ?? deliverable.childIssue;
+        const contextIdentifier = contextIssue.identifier ?? contextIssue.title;
+        return {
+          id: `deliverable:${deliverable.id}`,
+          name: deliverable.title,
+          kind: "deliverable" as const,
+          deliverableId: deliverable.id,
+          deliverableContextLabel: contextIdentifier
+            ? `${contextIdentifier} ${contextIssue.title}`.trim()
+            : contextIssue.title,
+          deliverableFilename: deliverable.originalFilename ?? null,
+          searchText: [
+            deliverable.title,
+            deliverable.originalFilename,
+            contextIssue.identifier,
+            contextIssue.title,
+          ].filter(Boolean).join(" "),
+        };
+      }),
     ...[...(args.projects ?? [])]
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((project) => ({

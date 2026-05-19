@@ -513,6 +513,11 @@ export {
   parseIssueArtifactWorkProductMetadata,
 } from "./types/index.js";
 export {
+  buildDeliverableReferenceHref,
+  parseDeliverableReferenceHref,
+} from "./deliverable-references.js";
+
+export {
   ISSUE_REFERENCE_IDENTIFIER_RE,
   buildIssueReferenceHref,
   extractIssueReferenceIdentifiers,

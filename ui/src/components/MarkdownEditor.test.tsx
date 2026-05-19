@@ -3,7 +3,12 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildProjectMentionHref, buildSkillMentionHref } from "@paperclipai/shared";
+import {
+  buildDeliverableReferenceHref,
+  buildIssueReferenceHref,
+  buildProjectMentionHref,
+  buildSkillMentionHref,
+} from "@paperclipai/shared";
 import {
   computeMentionMenuPosition,
   findClosestAutocompleteAnchor,
@@ -360,10 +365,43 @@ describe("MarkdownEditor", () => {
     expect(findMentionMatch("Ping @Paperclip App", "Ping @Paperclip App".length)).toEqual({
       trigger: "mention",
       marker: "@",
+      mentionKind: "agent",
+      markerCount: 1,
       query: "Paperclip App",
       atPos: 5,
       endPos: "Ping @Paperclip App".length,
     });
+  });
+
+  it("switches the mention domain based on repeated @ markers", () => {
+    expect(findMentionMatch("@@PAP", "@@PAP".length)).toEqual({
+      trigger: "mention",
+      marker: "@",
+      mentionKind: "issue",
+      markerCount: 2,
+      query: "PAP",
+      atPos: 0,
+      endPos: "@@PAP".length,
+    });
+    expect(findMentionMatch("@@@Final", "@@@Final".length)).toEqual({
+      trigger: "mention",
+      marker: "@",
+      mentionKind: "deliverable",
+      markerCount: 3,
+      query: "Final",
+      atPos: 0,
+      endPos: "@@@Final".length,
+    });
+    expect(findMentionMatch("@@@@Auth", "@@@@Auth".length)).toEqual({
+      trigger: "mention",
+      marker: "@",
+      mentionKind: "project",
+      markerCount: 4,
+      query: "Auth",
+      atPos: 0,
+      endPos: "@@@@Auth".length,
+    });
+    expect(findMentionMatch("@@@@@Nope", "@@@@@Nope".length)).toBeNull();
   });
 
   it("still rejects slash commands once spaces are typed", () => {
@@ -383,6 +421,8 @@ describe("MarkdownEditor", () => {
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent",
         textNode,
         atPos: 0,
@@ -391,6 +431,8 @@ describe("MarkdownEditor", () => {
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent",
         textNode,
         atPos: 0,
@@ -402,6 +444,8 @@ describe("MarkdownEditor", () => {
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent",
         textNode,
         atPos: 0,
@@ -410,6 +454,8 @@ describe("MarkdownEditor", () => {
       {
         trigger: "skill",
         marker: "/",
+        markerCount: 1,
+        mentionKind: null,
         query: "agent-browser",
         textNode,
         atPos: 0,
@@ -467,7 +513,7 @@ describe("MarkdownEditor", () => {
     await act(async () => {
       root.render(
         <MarkdownEditor
-          value="@Pap"
+          value="@@@@Pap"
           onChange={handleChange}
           mentions={[
             {
@@ -492,7 +538,7 @@ describe("MarkdownEditor", () => {
 
     const selection = window.getSelection();
     const range = document.createRange();
-    range.setStart(textNode!, "@Pap".length);
+    range.setStart(textNode!, "@@@@Pap".length);
     range.collapse(true);
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -512,8 +558,172 @@ describe("MarkdownEditor", () => {
     });
 
     expect(handleChange).toHaveBeenCalledWith(
-      `[@Paperclip App](${buildProjectMentionHref("project-123", "#336699")}) `,
+      `[Paperclip App](${buildProjectMentionHref("project-123", "#336699")}) `,
     );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens issue mode immediately for @@ and inserts a canonical issue link on selection", async () => {
+    const handleChange = vi.fn();
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@@"
+          onChange={handleChange}
+          mentions={[
+            {
+              id: "issue:issue-123",
+              kind: "issue",
+              name: "Tighten wake context",
+              issueId: "issue-123",
+              issueIdentifier: "PAP-123",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@@".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).toContain("Agents");
+    expect(document.body.textContent).toContain("Search issues");
+    expect(document.body.textContent).toContain("Issues");
+    expect(document.body.textContent).toContain("Deliverables");
+    expect(document.body.textContent).toContain("Projects");
+    const option = Array.from(document.body.querySelectorAll('button[type="button"]'))
+      .find((node) => node.textContent?.includes("PAP-123"));
+    expect(option).toBeTruthy();
+
+    act(() => {
+      option?.dispatchEvent(new Event("touchstart", { bubbles: true, cancelable: true }));
+    });
+
+    expect(handleChange).toHaveBeenCalledWith(
+      `[PAP-123](${buildIssueReferenceHref("PAP-123")}) `,
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("opens deliverable mode immediately for @@@ and inserts a canonical deliverable link on selection", async () => {
+    const handleChange = vi.fn();
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@@@"
+          onChange={handleChange}
+          mentions={[
+            {
+              id: "deliverable:deliverable-123",
+              kind: "deliverable",
+              name: "Final Report",
+              deliverableId: "deliverable-123",
+              deliverableContextLabel: "PAP-9 Quarterly review",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@@@".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).toContain("Search deliverables");
+    const option = Array.from(document.body.querySelectorAll('button[type="button"]'))
+      .find((node) => node.textContent?.includes("Final Report"));
+    expect(option).toBeTruthy();
+
+    act(() => {
+      option?.dispatchEvent(new Event("touchstart", { bubbles: true, cancelable: true }));
+    });
+
+    expect(handleChange).toHaveBeenCalledWith(
+      `[Final Report](${buildDeliverableReferenceHref("deliverable-123")}) `,
+    );
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("closes the menu when five @ markers are typed", async () => {
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@@@@@"
+          onChange={() => {}}
+          mentions={[
+            {
+              id: "project:project-123",
+              kind: "project",
+              name: "Paperclip App",
+              projectId: "project-123",
+              projectColor: "#336699",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@@@@@".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).not.toContain("Search projects");
+    expect(document.body.textContent).not.toContain("Agents");
 
     await act(async () => {
       root.unmount();

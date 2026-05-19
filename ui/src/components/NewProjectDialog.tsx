@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
 import { accessApi } from "../api/access";
+import { deliverablesApi } from "../api/deliverables";
+import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import { agentsApi } from "../api/agents";
 import { goalsApi } from "../api/goals";
@@ -76,6 +78,21 @@ export function NewProjectDialog() {
     queryFn: () => agentsApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId && newProjectOpen,
   });
+  const { data: projects } = useQuery({
+    queryKey: queryKeys.projects.list(selectedCompanyId!),
+    queryFn: () => projectsApi.list(selectedCompanyId!),
+    enabled: !!selectedCompanyId && newProjectOpen,
+  });
+  const { data: issueOptions } = useQuery({
+    queryKey: selectedCompanyId ? ["issues", selectedCompanyId, "autocomplete", 200] : ["issues", "new-project", "pending"],
+    queryFn: () => issuesApi.list(selectedCompanyId!, { limit: 200 }),
+    enabled: !!selectedCompanyId && newProjectOpen,
+  });
+  const { data: deliverableOptions } = useQuery({
+    queryKey: selectedCompanyId ? queryKeys.deliverables.list(selectedCompanyId, { limit: 200 }) : ["deliverables", "new-project", "pending"],
+    queryFn: () => deliverablesApi.list(selectedCompanyId!, { limit: 200 }),
+    enabled: !!selectedCompanyId && newProjectOpen,
+  });
 
   const { data: companyMembers } = useQuery({
     queryKey: queryKeys.access.companyUserDirectory(selectedCompanyId!),
@@ -86,9 +103,12 @@ export function NewProjectDialog() {
   const mentionOptions = useMemo<MentionOption[]>(() => {
     return buildMarkdownMentionOptions({
       agents,
+      issues: issueOptions,
+      deliverables: deliverableOptions?.items,
+      projects,
       members: companyMembers?.users,
     });
-  }, [agents, companyMembers?.users]);
+  }, [agents, companyMembers?.users, deliverableOptions?.items, issueOptions, projects]);
 
   const createProject = useMutation({
     mutationFn: (data: Record<string, unknown>) =>

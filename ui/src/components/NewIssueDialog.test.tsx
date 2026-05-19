@@ -38,6 +38,7 @@ const toastState = vi.hoisted(() => ({
 }));
 
 const mockIssuesApi = vi.hoisted(() => ({
+  list: vi.fn(),
   create: vi.fn(),
   upsertDocument: vi.fn(),
   uploadAttachment: vi.fn(),
@@ -48,6 +49,10 @@ const mockExecutionWorkspacesApi = vi.hoisted(() => ({
 }));
 
 const mockProjectsApi = vi.hoisted(() => ({
+  list: vi.fn(),
+}));
+
+const mockDeliverablesApi = vi.hoisted(() => ({
   list: vi.fn(),
 }));
 
@@ -90,6 +95,10 @@ vi.mock("../api/execution-workspaces", () => ({
 
 vi.mock("../api/projects", () => ({
   projectsApi: mockProjectsApi,
+}));
+
+vi.mock("../api/deliverables", () => ({
+  deliverablesApi: mockDeliverablesApi,
 }));
 
 vi.mock("../api/agents", () => ({
@@ -251,6 +260,7 @@ describe("NewIssueDialog", () => {
     dialogState.closeNewIssue.mockReset();
     toastState.pushToast.mockReset();
     mockIssuesApi.create.mockReset();
+    mockIssuesApi.list.mockResolvedValue([]);
     mockIssuesApi.upsertDocument.mockReset();
     mockIssuesApi.uploadAttachment.mockReset();
     mockExecutionWorkspacesApi.list.mockResolvedValue([]);
@@ -263,6 +273,7 @@ describe("NewIssueDialog", () => {
         color: "#445566",
       },
     ]);
+    mockDeliverablesApi.list.mockResolvedValue({ items: [], limit: 200, offset: 0 });
     mockAgentsApi.list.mockResolvedValue([]);
     mockAgentsApi.adapterModels.mockResolvedValue([]);
     mockAuthApi.getSession.mockResolvedValue({ user: { id: "user-1" } });
