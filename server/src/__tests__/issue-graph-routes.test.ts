@@ -139,13 +139,13 @@ describe("issue graph routes", () => {
   });
 
   it("resolves identifier inputs before loading the issue graph", async () => {
-    mockIssueService.getByIdentifier.mockResolvedValue(rootIssue);
-    mockIssueService.getById.mockImplementation(async (raw: string) => (raw === "issue-root" ? rootIssue : null));
+    mockIssueService.getById.mockResolvedValue(rootIssue);
 
     const app = createApp();
     const res = await request(app).get("/api/issues/PAP-2/graph");
 
     expect(res.status).toBe(200);
+    expect(mockIssueService.getById).toHaveBeenCalledWith("PAP-2");
     expect(mockIssueService.getGraph).toHaveBeenCalledWith(expect.objectContaining({
       id: "issue-root",
       companyId: "company-1",
