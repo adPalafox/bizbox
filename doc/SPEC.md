@@ -410,7 +410,7 @@ No separate "agent API" vs. "board API." Same endpoints, different authorization
 
 ### Work Artifacts
 
-Bizbox manages task-linked work artifacts: issue documents (rich-text plans, specs, notes attached to issues) and file attachments. Agents read and write these through the API as part of normal task execution. Full delivery infrastructure (code repos, deployments, production runtime) remains the agent's domain — Bizbox orchestrates the work, not the build pipeline.
+Bizbox manages task-linked work artifacts: issue documents (rich-text plans, specs, notes attached to issues) and file attachments. These surface at the board level through the Deliverables views, and execution flow can be inspected through an issue pipeline rooted in the task hierarchy. Agents read and write these through the API as part of normal task execution. Full delivery infrastructure (code repos, deployments, production runtime) remains the agent's domain — Bizbox orchestrates the work, not the build pipeline.
 
 ### Open Questions
 
@@ -447,7 +447,7 @@ The plugin framework has shipped. Plugins can register new adapter types, hook i
 Each is a distinct page/route:
 
 1. **Org Chart** — the org tree with live status indicators (running/idle/paused/error) per agent. Real-time activity feed of what agents are doing.
-2. **Task Board** — Task management. Kanban and list views. Filter by team, agent, project, status.
+2. **Task Board** — Task management. Kanban and list views, plus issue pipeline inspection for rooted execution flow. Filter by team, agent, project, status.
 3. **Dashboard** — high-level metrics: agent count, active tasks, costs, goal progress, burn rate. The "glance" view from GOAL.md.
 4. **Agent Detail** — deep dive on a single agent: their tasks, activity, costs, configuration, status history.
 5. **Project/Initiative Views** — progress tracking against milestones and goals.
