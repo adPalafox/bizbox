@@ -1133,14 +1133,14 @@ export function IssueDetail() {
     enabled: !!selectedCompanyId,
   });
   const { data: issueOptions } = useQuery({
-    queryKey: resolvedCompanyId ? ["issues", resolvedCompanyId, "autocomplete", 200] : ["issues", "detail", "pending"],
-    queryFn: () => issuesApi.list(resolvedCompanyId!, { limit: 200 }),
-    enabled: !!resolvedCompanyId,
+    queryKey: selectedCompanyId ? ["issues", selectedCompanyId, "autocomplete", 200] : ["issues", "detail", "pending"],
+    queryFn: () => issuesApi.list(selectedCompanyId!, { limit: 200 }),
+    enabled: !!selectedCompanyId,
   });
   const { data: deliverableOptions } = useQuery({
-    queryKey: resolvedCompanyId ? queryKeys.deliverables.list(resolvedCompanyId, { limit: 200 }) : ["deliverables", "detail", "pending"],
-    queryFn: () => deliverablesApi.list(resolvedCompanyId!, { limit: 200 }),
-    enabled: !!resolvedCompanyId,
+    queryKey: selectedCompanyId ? queryKeys.deliverables.list(selectedCompanyId, { limit: 200 }) : ["deliverables", "detail", "pending"],
+    queryFn: () => deliverablesApi.list(selectedCompanyId!, { limit: 200 }),
+    enabled: !!selectedCompanyId,
   });
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
   const { data: feedbackVotes } = useQuery({
