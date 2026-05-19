@@ -427,8 +427,21 @@ export function IssueGraph() {
         onTouchCancel={stopDrag}
         onWheel={(event) => {
           event.preventDefault();
+          const container = containerRef.current;
+          if (!container) return;
+          const rect = container.getBoundingClientRect();
+          const cursorX = event.clientX - rect.left;
+          const cursorY = event.clientY - rect.top;
           const delta = event.deltaY > 0 ? -0.1 : 0.1;
-          setZoom((value) => clampZoom(value + delta));
+          setZoom((prevZoom) => {
+            const nextZoom = clampZoom(prevZoom + delta);
+            const scale = nextZoom / prevZoom;
+            setPan((prevPan) => ({
+              x: cursorX - scale * (cursorX - prevPan.x),
+              y: cursorY - scale * (cursorY - prevPan.y),
+            }));
+            return nextZoom;
+          });
         }}
       >
         <div
@@ -587,9 +600,9 @@ export function IssueGraph() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-foreground">{deliverable.title}</span>
                   <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{deliverable.deliverableKind}</span>
-                  {deliverable.originatingIssueId !== deliverable.issueId ? (
+                  {deliverable.pipelineRootIssueId !== deliverable.issueId ? (
                     <span className="block truncate text-[10px] text-muted-foreground">
-                      Part of {deliverable.originatingIssueIdentifier ?? deliverable.originatingIssueTitle} pipeline
+                      Part of {deliverable.pipelineRootIssueIdentifier ?? deliverable.pipelineRootIssueTitle} pipeline
                     </span>
                   ) : null}
                 </span>

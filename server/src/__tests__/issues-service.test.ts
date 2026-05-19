@@ -1155,16 +1155,16 @@ describeEmbeddedPostgres("issueService.list participantAgentId", () => {
         expect.objectContaining({
           id: artifactId,
           issueId: childIssueId,
-          originatingIssueId: rootIssueId,
-          originatingIssueIdentifier: "PAP-1",
-          originatingIssueTitle: "Root issue",
+          pipelineRootIssueId: rootIssueId,
+          pipelineRootIssueIdentifier: "PAP-1",
+          pipelineRootIssueTitle: "Root issue",
         }),
         expect.objectContaining({
           id: issueDocumentId,
           issueId: grandchildIssueId,
-          originatingIssueId: rootIssueId,
-          originatingIssueIdentifier: "PAP-1",
-          originatingIssueTitle: "Root issue",
+          pipelineRootIssueId: rootIssueId,
+          pipelineRootIssueIdentifier: "PAP-1",
+          pipelineRootIssueTitle: "Root issue",
         }),
       ]),
     );
