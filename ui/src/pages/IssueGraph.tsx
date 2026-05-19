@@ -590,6 +590,7 @@ export function IssueGraph() {
                   "absolute flex items-center gap-2 rounded-lg border border-border bg-background/95 px-3 shadow-xs hover:border-primary/40",
                 )}
                 style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+                onMouseDown={(event) => event.stopPropagation()}
                 data-node-kind="deliverable"
               >
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted">
