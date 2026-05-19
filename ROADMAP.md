@@ -50,9 +50,9 @@ Bizbox should support explicit review and approval stages as first-class workflo
 
 Bizbox needs a clearer path from solo operator to real human teams. That means shared board access, safer collaboration, and a better model for several humans supervising the same autonomous company.
 
-### ⚪ Artifacts & Work Products
+### ✅ Deliverables & Work Products
 
-Bizbox should make outputs first-class. That means generated artifacts, previews, deployable outputs, and the handoff from "agent did work" to "here is the result" should become more visible and easier to operate.
+Bizbox makes outputs first-class. Generated deliverables, previews, deployable outputs, and the handoff from "agent did work" to "here is the result" are now part of the product surface.
 
 ### ⚪ Memory / Knowledge
 
