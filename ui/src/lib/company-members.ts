@@ -90,10 +90,9 @@ export function buildMarkdownMentionOptions(args: {
   deliverables?: Array<Pick<DeliverableListItem, "id" | "title" | "originalFilename" | "childIssue" | "rootIssue">> | null | undefined;
   projects?: Array<Pick<Project, "id" | "name" | "color">> | null | undefined;
   members?: CompanyUserRecord[] | null | undefined;
-  includeUsers?: boolean;
 }): MentionOption[] {
   const options: MentionOption[] = [
-    ...(args.includeUsers ? buildCompanyUserMentionOptions(args.members) : []),
+    ...buildCompanyUserMentionOptions(args.members),
     ...[...(args.agents ?? [])]
       .filter((agent) => agent.status !== "terminated")
       .sort((left, right) => left.name.localeCompare(right.name))
@@ -117,10 +116,11 @@ export function buildMarkdownMentionOptions(args: {
       })),
     ...[...(args.deliverables ?? [])]
       .sort((left, right) => left.title.localeCompare(right.title))
-      .map((deliverable) => {
-        const contextIssue = deliverable.rootIssue ?? deliverable.childIssue;
+      .flatMap((deliverable) => {
+        const contextIssue = deliverable.rootIssue ?? deliverable.childIssue ?? null;
+        if (!contextIssue) return [];
         const contextIdentifier = contextIssue.identifier ?? contextIssue.title;
-        return {
+        return [{
           id: `deliverable:${deliverable.id}`,
           name: deliverable.title,
           kind: "deliverable" as const,
@@ -135,7 +135,7 @@ export function buildMarkdownMentionOptions(args: {
             contextIssue.identifier,
             contextIssue.title,
           ].filter(Boolean).join(" "),
-        };
+        }];
       }),
     ...[...(args.projects ?? [])]
       .sort((left, right) => left.name.localeCompare(right.name))

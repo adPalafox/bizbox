@@ -208,7 +208,7 @@ const MENTION_MENU_PADDING = 8;
 const MENTION_MENU_ROW_HEIGHT = 34;
 const MENTION_MENU_CHROME_HEIGHT = 8;
 const MENTION_DOMAIN_TABS = [
-  { kind: "agent", label: "Agents" },
+  { kind: "agent", label: "Members" },
   { kind: "issue", label: "Issues" },
   { kind: "deliverable", label: "Deliverables" },
   { kind: "project", label: "Projects" },
@@ -637,7 +637,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
     const candidates = mentions.filter((mention) => {
       switch (mentionState.mentionKind) {
         case "agent":
-          return mention.kind === "agent";
+          return mention.kind === "agent" || mention.kind === "user";
         case "issue":
           return mention.kind === "issue";
         case "deliverable":
@@ -1218,22 +1218,27 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
             }}
           >
             <div className="border-b border-border">
-              <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5 text-xs text-muted-foreground">
-                {MENTION_DOMAIN_TABS.map((tab) => (
-                  <div
-                    key={tab.kind}
-                    className={cn(
-                      "shrink-0 rounded-sm px-2 py-1",
-                      mentionState.mentionKind === tab.kind
-                        ? "bg-accent text-foreground"
-                        : "opacity-70",
-                    )}
-                  >
-                    {tab.label}
-                  </div>
-                ))}
-              </div>
-              <div className="border-t border-border px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+              {mentionState.trigger === "mention" ? (
+                <div className="flex items-center gap-1 overflow-x-auto px-2 py-1.5 text-xs text-muted-foreground">
+                  {MENTION_DOMAIN_TABS.map((tab) => (
+                    <div
+                      key={tab.kind}
+                      className={cn(
+                        "shrink-0 rounded-sm px-2 py-1",
+                        mentionState.mentionKind === tab.kind
+                          ? "bg-accent text-foreground"
+                          : "opacity-70",
+                      )}
+                    >
+                      {tab.label}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className={cn(
+                "px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground",
+                mentionState.trigger === "mention" && "border-t border-border",
+              )}>
                 {mentionPromptLabel(mentionState)}
               </div>
             </div>
@@ -1368,7 +1373,7 @@ function mentionPromptLabel(state: MentionState): string {
       return "Search projects";
     case "agent":
     default:
-      return "Search agents";
+      return "Search members";
   }
 }
 

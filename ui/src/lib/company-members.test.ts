@@ -81,7 +81,6 @@ describe("company-members helpers", () => {
         rootIssue: null,
       }],
       projects: [{ id: "project-1", name: "Paperclip App", color: "#336699" }],
-      includeUsers: true,
     });
 
     expect(options).toEqual([
@@ -124,8 +123,24 @@ describe("company-members helpers", () => {
         searchText: "Taylor taylor@example.com user-1",
       },
     ]);
-    expect(buildMarkdownMentionOptions({ members: users, includeUsers: true })).toEqual([
+    expect(buildMarkdownMentionOptions({ members: users })).toEqual([
       { id: "user:user-1", name: "Taylor", kind: "user", userId: "user-1" },
     ]);
+  });
+
+  it("skips malformed deliverables with no context issue", () => {
+    const malformedDeliverable = {
+      id: "deliverable-bad",
+      title: "Broken deliverable",
+      originalFilename: "broken.pdf",
+      childIssue: null,
+      rootIssue: null,
+    } as unknown as NonNullable<Parameters<typeof buildMarkdownMentionOptions>[0]["deliverables"]>[number];
+
+    const options = buildMarkdownMentionOptions({
+      deliverables: [malformedDeliverable],
+    });
+
+    expect(options).toEqual([]);
   });
 });

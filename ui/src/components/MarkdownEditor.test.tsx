@@ -27,6 +27,20 @@ const mdxEditorMockState = vi.hoisted(() => ({
   suppressHtmlProcessingValues: [] as boolean[],
 }));
 
+const editorAutocompleteMockState = vi.hoisted(() => ({
+  slashCommands: [] as Array<{
+    id: string;
+    kind: "skill";
+    skillId: string;
+    key: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    href: string;
+    aliases: string[];
+  }>,
+}));
+
 vi.mock("@mdxeditor/editor", async () => {
   const React = await import("react");
 
@@ -144,6 +158,12 @@ vi.mock("../lib/paste-normalization", () => ({
   pasteNormalizationPlugin: () => ({}),
 }));
 
+vi.mock("../context/EditorAutocompleteContext", () => ({
+  useEditorAutocomplete: () => ({
+    slashCommands: editorAutocompleteMockState.slashCommands,
+  }),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -161,6 +181,7 @@ describe("MarkdownEditor", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     originalRangeRect = Range.prototype.getBoundingClientRect;
+    editorAutocompleteMockState.slashCommands = [];
     Range.prototype.getBoundingClientRect = () => ({
       x: 32,
       y: 24,
@@ -415,6 +436,57 @@ describe("MarkdownEditor", () => {
     expect(shouldAcceptAutocompleteKey("Tab", "skill")).toBe(true);
   });
 
+  it("does not render mention domain tabs for slash-command autocomplete", async () => {
+    editorAutocompleteMockState.slashCommands = [
+      {
+        id: "skill:skill-123",
+        kind: "skill",
+        skillId: "skill-123",
+        key: "agent-browser",
+        name: "Agent Browser",
+        slug: "agent-browser",
+        description: "Launch the browser skill",
+        href: buildSkillMentionHref("skill-123", "agent-browser"),
+        aliases: ["agent-browser", "Agent Browser"],
+      },
+    ];
+
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="/agent"
+          onChange={() => {}}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "/agent".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).not.toContain("Members");
+    expect(document.body.textContent).toContain("Search skills");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("keeps the same autocomplete session active while the slash query is unchanged", () => {
     const textNode = document.createTextNode("/agent");
     expect(isSameAutocompleteSession(
@@ -566,6 +638,59 @@ describe("MarkdownEditor", () => {
     });
   });
 
+  it("includes human members in single-@ results", async () => {
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="@Tay"
+          onChange={() => {}}
+          mentions={[
+            {
+              id: "user:user-123",
+              kind: "user",
+              name: "Taylor",
+              userId: "user-123",
+            },
+            {
+              id: "agent:agent-123",
+              kind: "agent",
+              name: "CodexCoder",
+              agentId: "agent-123",
+              agentIcon: "code",
+            },
+          ]}
+        />,
+      );
+    });
+
+    await flush();
+
+    const editable = container.querySelector('[contenteditable="true"]');
+    const textNode = editable?.firstChild;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.setStart(textNode!, "@Tay".length);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    await flush();
+
+    expect(document.body.textContent).toContain("Members");
+    expect(document.body.textContent).toContain("Search members");
+    expect(document.body.textContent).toContain("Taylor");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("opens issue mode immediately for @@ and inserts a canonical issue link on selection", async () => {
     const handleChange = vi.fn();
     const root = createRoot(container);
@@ -605,7 +730,7 @@ describe("MarkdownEditor", () => {
 
     await flush();
 
-    expect(document.body.textContent).toContain("Agents");
+    expect(document.body.textContent).toContain("Members");
     expect(document.body.textContent).toContain("Search issues");
     expect(document.body.textContent).toContain("Issues");
     expect(document.body.textContent).toContain("Deliverables");
@@ -723,7 +848,7 @@ describe("MarkdownEditor", () => {
     await flush();
 
     expect(document.body.textContent).not.toContain("Search projects");
-    expect(document.body.textContent).not.toContain("Agents");
+    expect(document.body.textContent).not.toContain("Members");
 
     await act(async () => {
       root.unmount();
