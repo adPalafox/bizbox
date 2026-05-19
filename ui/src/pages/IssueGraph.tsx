@@ -176,13 +176,12 @@ function buildIssueLayout(graph: IssueGraphResponse) {
   const position = (issueId: string, startY: number, visited: Set<string>) => {
     if (visited.has(issueId)) return;
     visited.add(issueId);
-    const subtreeHeight = subtreeHeights.get(issueId) ?? ROW_GAP;
     const depth = depthMap.get(issueId) ?? 0;
     issueRects.set(issueId, {
       id: issueId,
       nodeId: issueNodeId(issueId),
       x: PADDING_X + depth * COL_GAP,
-      y: PADDING_Y + startY + subtreeHeight / 2 - ISSUE_H / 2,
+      y: PADDING_Y + startY,
       width: ISSUE_W,
       height: ISSUE_H,
     });

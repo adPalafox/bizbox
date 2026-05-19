@@ -1356,6 +1356,16 @@ export function issueService(db: Db) {
     };
   }
 
+  async function getGraph(input: string): Promise<IssueGraphResponse | null>;
+  async function getGraph(
+    input: Pick<IssueRow, "companyId" | "id" | "parentId">,
+  ): Promise<IssueGraphResponse>;
+  async function getGraph(
+    input: string | Pick<IssueRow, "companyId" | "id" | "parentId">,
+  ): Promise<IssueGraphResponse | null> {
+    return buildIssueGraph(input);
+  }
+
   function redactIssueComment<T extends { body: string }>(comment: T, censorUsernameInLogs: boolean): T {
     return {
       ...comment,
@@ -2163,9 +2173,7 @@ export function issueService(db: Db) {
       return getIssueByIdentifier(identifier);
     },
 
-    getGraph: async (input: string | Pick<IssueRow, "companyId" | "id" | "parentId">) => {
-      return buildIssueGraph(input);
-    },
+    getGraph,
 
     getRelationSummaries: async (issueId: string) => {
       const issue = await db
