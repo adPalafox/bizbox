@@ -273,12 +273,14 @@ export function IssueGraph() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const latestPanRef = useRef(pan);
+  const latestZoomRef = useRef(zoom);
   const dragRef = useRef<{ active: boolean; start: TouchPoint; pan: TouchPoint }>({
     active: false,
     start: { x: 0, y: 0 },
     pan: { x: 0, y: 0 },
   });
   latestPanRef.current = pan;
+  latestZoomRef.current = zoom;
 
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.issues.graph(issueId ?? ""),
@@ -435,15 +437,16 @@ export function IssueGraph() {
           const cursorX = event.clientX - rect.left;
           const cursorY = event.clientY - rect.top;
           const delta = event.deltaY > 0 ? -0.1 : 0.1;
-          setZoom((prevZoom) => {
-            const nextZoom = clampZoom(prevZoom + delta);
-            const scale = nextZoom / prevZoom;
-            setPan((prevPan) => ({
-              x: cursorX - scale * (cursorX - prevPan.x),
-              y: cursorY - scale * (cursorY - prevPan.y),
-            }));
-            return nextZoom;
+          const prevZoom = latestZoomRef.current;
+          const nextZoom = clampZoom(prevZoom + delta);
+          if (nextZoom === prevZoom) return;
+          const prevPan = latestPanRef.current;
+          const scale = nextZoom / prevZoom;
+          setPan({
+            x: cursorX - scale * (cursorX - prevPan.x),
+            y: cursorY - scale * (cursorY - prevPan.y),
           });
+          setZoom(nextZoom);
         }}
       >
         <div
