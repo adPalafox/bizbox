@@ -117,6 +117,15 @@ function createApp(companyIds: string[] = ["company-1"]) {
 }
 
 describe("issue graph routes", () => {
+  const rootIssue = {
+    id: "issue-root",
+    companyId: "company-1",
+    parentId: null,
+    title: "Root issue",
+    status: "todo",
+    priority: "medium",
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockIssueService.getByIdentifier.mockResolvedValue(null);
@@ -129,35 +138,35 @@ describe("issue graph routes", () => {
     });
   });
 
-  it("resolves graph requests by identifier and uuid", async () => {
-    mockIssueService.getByIdentifier.mockResolvedValue({
-      id: "issue-root",
-      companyId: "company-1",
-      parentId: null,
-      title: "Root issue",
-      status: "todo",
-      priority: "medium",
-    });
-    mockIssueService.getById.mockResolvedValue({
-      id: "issue-root",
-      companyId: "company-1",
-      parentId: null,
-      title: "Root issue",
-      status: "todo",
-      priority: "medium",
-    });
+  it("resolves identifier inputs before loading the issue graph", async () => {
+    mockIssueService.getByIdentifier.mockResolvedValue(rootIssue);
+    mockIssueService.getById.mockImplementation(async (raw: string) => (raw === "issue-root" ? rootIssue : null));
 
     const app = createApp();
-    const identifierRes = await request(app).get("/api/issues/PAP-2/graph");
-    const uuidRes = await request(app).get("/api/issues/11111111-1111-4111-8111-111111111111/graph");
+    const res = await request(app).get("/api/issues/PAP-2/graph");
 
-    expect(identifierRes.status).toBe(200);
-    expect(uuidRes.status).toBe(200);
-    expect(mockIssueService.getByIdentifier).toHaveBeenCalledWith("PAP-2");
-    expect(mockIssueService.getById).toHaveBeenCalledWith("issue-root");
-    expect(mockIssueService.getById).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111111");
+    expect(res.status).toBe(200);
     expect(mockIssueService.getGraph).toHaveBeenCalledWith(expect.objectContaining({
       id: "issue-root",
+      companyId: "company-1",
+      parentId: null,
+    }));
+  });
+
+  it("loads graph requests by uuid without identifier normalization", async () => {
+    const uuidIssue = {
+      ...rootIssue,
+      id: "11111111-1111-4111-8111-111111111111",
+    };
+    mockIssueService.getById.mockImplementation(async (raw: string) =>
+      raw === "11111111-1111-4111-8111-111111111111" ? uuidIssue : null,
+    );
+
+    const res = await request(createApp()).get("/api/issues/11111111-1111-4111-8111-111111111111/graph");
+
+    expect(res.status).toBe(200);
+    expect(mockIssueService.getGraph).toHaveBeenCalledWith(expect.objectContaining({
+      id: "11111111-1111-4111-8111-111111111111",
       companyId: "company-1",
       parentId: null,
     }));
