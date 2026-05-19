@@ -272,11 +272,13 @@ export function IssueGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const latestPanRef = useRef(pan);
   const dragRef = useRef<{ active: boolean; start: TouchPoint; pan: TouchPoint }>({
     active: false,
     start: { x: 0, y: 0 },
     pan: { x: 0, y: 0 },
   });
+  latestPanRef.current = pan;
 
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.issues.graph(issueId ?? ""),
@@ -327,9 +329,9 @@ export function IssueGraph() {
     dragRef.current = {
       active: true,
       start: { x: clientX, y: clientY },
-      pan,
+      pan: latestPanRef.current,
     };
-  }, [pan]);
+  }, []);
 
   const onPointerMove = useCallback((clientX: number, clientY: number) => {
     if (!dragRef.current.active) return;

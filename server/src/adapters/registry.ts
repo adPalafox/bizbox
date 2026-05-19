@@ -99,7 +99,7 @@ import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
 
-const clickUpAgentRefConfigurationDoc =
+const resolvedClickUpAgentRefConfigurationDoc =
   ("agentConfigurationDoc" in clickUpAgentRefPackage &&
   typeof clickUpAgentRefPackage.agentConfigurationDoc === "string"
     ? clickUpAgentRefPackage.agentConfigurationDoc
@@ -109,7 +109,15 @@ const clickUpAgentRefConfigurationDoc =
         "agentConfigurationDoc" in clickUpAgentRefPackage.default &&
         typeof clickUpAgentRefPackage.default.agentConfigurationDoc === "string"
       ? clickUpAgentRefPackage.default.agentConfigurationDoc
-      : "");
+      : null);
+
+if (resolvedClickUpAgentRefConfigurationDoc === null) {
+  console.warn(
+    "[registry] clickup_agent_ref: 'agentConfigurationDoc' export not found — ClickUp adapter will have no configuration documentation",
+  );
+}
+
+const clickUpAgentRefConfigurationDoc = resolvedClickUpAgentRefConfigurationDoc ?? "";
 
 const resolvedClickUpAgentRefModels =
   ("models" in clickUpAgentRefPackage && Array.isArray(clickUpAgentRefPackage.models)
