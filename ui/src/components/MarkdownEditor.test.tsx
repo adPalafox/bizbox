@@ -13,6 +13,7 @@ import {
   computeMentionMenuPosition,
   findClosestAutocompleteAnchor,
   findMentionMatch,
+  getMentionMenuSize,
   isSameAutocompleteSession,
   MarkdownEditor,
   placeCaretAfterMentionAnchor,
@@ -353,7 +354,7 @@ describe("MarkdownEditor", () => {
       ),
     ).toEqual({
       top: 372,
-      left: 144,
+      left: 64,
     });
   });
 
@@ -365,7 +366,7 @@ describe("MarkdownEditor", () => {
       ),
     ).toEqual({
       top: 12,
-      left: 92,
+      left: 8,
     });
   });
 
@@ -373,12 +374,23 @@ describe("MarkdownEditor", () => {
     expect(
       computeMentionMenuPosition(
         { viewportTop: 160, viewportLeft: 120 },
-        { offsetLeft: 0, offsetTop: 0, width: 320, height: 220 },
-        { width: 188, height: 42 },
+        { offsetLeft: 0, offsetTop: 0, width: 420, height: 280 },
+        getMentionMenuSize(0, "mention"),
       ),
     ).toEqual({
       top: 164,
       left: 120,
+    });
+  });
+
+  it("includes the mention header chrome when sizing empty-state menus", () => {
+    expect(getMentionMenuSize(0, "mention")).toEqual({
+      width: 280,
+      height: 92,
+    });
+    expect(getMentionMenuSize(0, "skill")).toEqual({
+      width: 280,
+      height: 62,
     });
   });
 

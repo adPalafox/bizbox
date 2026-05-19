@@ -202,11 +202,12 @@ interface MentionMenuSize {
   height: number;
 }
 
-const MENTION_MENU_WIDTH = 188;
+const MENTION_MENU_WIDTH = 280;
 const MENTION_MENU_HEIGHT = 208;
 const MENTION_MENU_PADDING = 8;
 const MENTION_MENU_ROW_HEIGHT = 34;
-const MENTION_MENU_CHROME_HEIGHT = 8;
+const MENTION_MENU_SKILL_CHROME_HEIGHT = 28;
+const MENTION_MENU_MENTION_CHROME_HEIGHT = 58;
 const MENTION_DOMAIN_TABS = [
   { kind: "agent", label: "Members" },
   { kind: "issue", label: "Issues" },
@@ -372,13 +373,20 @@ export function computeMentionMenuPosition(
   };
 }
 
-function getMentionMenuSize(optionCount: number): MentionMenuSize {
+export function getMentionMenuSize(
+  optionCount: number,
+  trigger: "mention" | "skill" = "mention",
+): MentionMenuSize {
   const visibleRows = Math.max(1, Math.min(optionCount, 8));
+  const chromeHeight = trigger === "mention"
+    ? MENTION_MENU_MENTION_CHROME_HEIGHT
+    : MENTION_MENU_SKILL_CHROME_HEIGHT;
+
   return {
     width: MENTION_MENU_WIDTH,
     height: Math.min(
       MENTION_MENU_HEIGHT,
-      visibleRows * MENTION_MENU_ROW_HEIGHT + MENTION_MENU_CHROME_HEIGHT,
+      visibleRows * MENTION_MENU_ROW_HEIGHT + chromeHeight,
     ),
   };
 }
@@ -1004,7 +1012,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorRef, MarkdownEditorProps>
     ? computeMentionMenuPosition(
         mentionState,
         getMentionMenuViewport(),
-        getMentionMenuSize(filteredMentions.length),
+        getMentionMenuSize(filteredMentions.length, mentionState.trigger),
       )
     : null;
 
