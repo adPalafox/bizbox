@@ -119,14 +119,13 @@ export function buildMarkdownMentionOptions(args: {
       .flatMap((deliverable) => {
         const contextIssue = deliverable.rootIssue ?? deliverable.childIssue ?? null;
         if (!contextIssue) return [];
-        const contextIdentifier = contextIssue.identifier ?? contextIssue.title;
         return [{
           id: `deliverable:${deliverable.id}`,
           name: deliverable.title,
           kind: "deliverable" as const,
           deliverableId: deliverable.id,
-          deliverableContextLabel: contextIdentifier
-            ? `${contextIdentifier} ${contextIssue.title}`.trim()
+          deliverableContextLabel: contextIssue.identifier
+            ? `${contextIssue.identifier} ${contextIssue.title}`.trim()
             : contextIssue.title,
           deliverableFilename: deliverable.originalFilename ?? null,
           searchText: [

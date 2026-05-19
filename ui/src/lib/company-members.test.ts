@@ -107,6 +107,30 @@ describe("company-members helpers", () => {
     ]);
   });
 
+  it("uses the issue title once when a deliverable context issue has no identifier", () => {
+    const options = buildMarkdownMentionOptions({
+      deliverables: [{
+        id: "deliverable-1",
+        title: "Final Report",
+        originalFilename: "report.pdf",
+        childIssue: { id: "issue-1", identifier: null, title: "Refactor auth", status: "done" },
+        rootIssue: null,
+      }],
+    });
+
+    expect(options).toEqual([
+      {
+        id: "deliverable:deliverable-1",
+        name: "Final Report",
+        kind: "deliverable",
+        deliverableId: "deliverable-1",
+        deliverableContextLabel: "Refactor auth",
+        deliverableFilename: "report.pdf",
+        searchText: "Final Report report.pdf Refactor auth",
+      },
+    ]);
+  });
+
   it("accepts read-only directory entries for assignee and mention helpers", () => {
     const users: CompanyUserDirectoryEntry[] = [
       {
