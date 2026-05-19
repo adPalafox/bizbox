@@ -111,7 +111,7 @@ const clickUpAgentRefConfigurationDoc =
       ? clickUpAgentRefPackage.default.agentConfigurationDoc
       : "");
 
-const clickUpAgentRefModels =
+const resolvedClickUpAgentRefModels =
   ("models" in clickUpAgentRefPackage && Array.isArray(clickUpAgentRefPackage.models)
     ? clickUpAgentRefPackage.models
     : "default" in clickUpAgentRefPackage &&
@@ -120,7 +120,15 @@ const clickUpAgentRefModels =
         "models" in clickUpAgentRefPackage.default &&
         Array.isArray(clickUpAgentRefPackage.default.models)
       ? clickUpAgentRefPackage.default.models
-      : []) as Array<{ id: string; label: string }>;
+      : null) as Array<{ id: string; label: string }> | null;
+
+if (!resolvedClickUpAgentRefModels) {
+  console.warn(
+    "[registry] clickup_agent_ref: 'models' export not found — ClickUp adapter will have no model choices",
+  );
+}
+
+const clickUpAgentRefModels = resolvedClickUpAgentRefModels ?? [];
 
 function normalizeHermesConfig<T extends { config?: unknown; agent?: unknown }>(ctx: T): T {
   const config =
