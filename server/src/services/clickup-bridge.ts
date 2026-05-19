@@ -42,20 +42,37 @@ function resolveRequiredServerExport<T extends (...args: never[]) => unknown>(
   throw new Error(`clickup_agent_ref server ${exportName} export is unavailable`);
 }
 
-const buildClickUpContextBody = resolveRequiredServerExport<
-  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
->("buildClickUpContextBody");
-
-const buildCommentPayload = resolveRequiredServerExport<
-  typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
->("buildCommentPayload");
-
 type ClickUpCommentPayloadConfig = Parameters<
   typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
 >[1];
 type ClickUpContextBodyConfig = Parameters<
   typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
 >[1];
+
+let cachedBuildClickUpContextBody:
+  | typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
+  | null = null;
+let cachedBuildCommentPayload:
+  | typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
+  | null = null;
+
+function getBuildClickUpContextBody() {
+  if (!cachedBuildClickUpContextBody) {
+    cachedBuildClickUpContextBody = resolveRequiredServerExport<
+      typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildClickUpContextBody
+    >("buildClickUpContextBody");
+  }
+  return cachedBuildClickUpContextBody;
+}
+
+function getBuildCommentPayload() {
+  if (!cachedBuildCommentPayload) {
+    cachedBuildCommentPayload = resolveRequiredServerExport<
+      typeof import("@paperclipai/adapter-clickup-agent-ref/server").buildCommentPayload
+    >("buildCommentPayload");
+  }
+  return cachedBuildCommentPayload;
+}
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
@@ -183,7 +200,7 @@ function buildBridgeCommentPayload(
     includeContextJson: cfg.includeContextJson,
     timeoutSec: cfg.timeoutSec,
   };
-  return buildCommentPayload(body, adapterConfig);
+  return getBuildCommentPayload()(body, adapterConfig);
 }
 
 function appendImportedId(existing: unknown, id: string): string[] {
@@ -376,7 +393,7 @@ export function clickupBridgeService(db: Db) {
         clickupAgentUrl: cfg.clickupAgentUrl,
         includeContextJson: cfg.includeContextJson,
       };
-      const body = buildClickUpContextBody(input.context, contextConfig);
+      const body = getBuildClickUpContextBody()(input.context, contextConfig);
       const now = new Date();
       const [upsertedBridge] = await db
         .insert(clickupBridges)
