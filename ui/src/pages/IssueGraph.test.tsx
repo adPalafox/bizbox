@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, type ReactNode } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IssueGraph } from "./IssueGraph";
@@ -206,16 +206,21 @@ function sampleGraph() {
 
 describe("IssueGraph page", () => {
   let container: HTMLDivElement;
+  let root: Root | null;
 
   beforeEach(() => {
     vi.useFakeTimers();
     currentIssueId = "PAP-2";
+    root = null;
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
   afterEach(() => {
     vi.runOnlyPendingTimers();
+    act(() => {
+      root?.unmount();
+    });
     vi.useRealTimers();
     container.remove();
     document.body.innerHTML = "";
@@ -225,7 +230,7 @@ describe("IssueGraph page", () => {
   it("renders a rooted pipeline while preserving the selected issue as the operator entry point", async () => {
     getGraphMock.mockResolvedValue(sampleGraph());
 
-    const root = createRoot(container);
+    root = createRoot(container);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -303,7 +308,7 @@ describe("IssueGraph page", () => {
     currentIssueId = "PAP-1";
     getGraphMock.mockResolvedValue(sampleGraph());
 
-    const root = createRoot(container);
+    root = createRoot(container);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
