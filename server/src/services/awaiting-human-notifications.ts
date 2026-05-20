@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { and, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { awaitingHumanNotificationOutbox } from "@paperclipai/db";
+import { buildDocumentFilename } from "../lib/document-filenames.js";
 import type { StorageService } from "../storage/types.js";
 import { getStorageService } from "../storage/index.js";
 
@@ -110,6 +111,10 @@ export interface ClickUpChatMessageReply {
 export interface ClickUpChatMessageReaction {
   name: string;
   count: number;
+}
+
+function buildDocumentReviewFilename(key: string | null | undefined, title: string | null | undefined) {
+  return buildDocumentFilename(key, title);
 }
 
 export interface ClickUpAwaitingHumanApprovalResult {
@@ -582,7 +587,7 @@ export async function resolveAwaitingHumanReviewFile(
     source: "document",
     deliverableId: document.deliverable_id,
     title: document.title?.trim() || key,
-    filename: `${key}.md`,
+    filename: buildDocumentReviewFilename(document.key, document.title),
     contentType: document.format === "markdown" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8",
     byteSize: Number(document.byte_size) || 0,
     contentPath,

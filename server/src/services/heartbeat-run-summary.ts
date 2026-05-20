@@ -42,6 +42,23 @@ function normalizeDocumentTitle(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function looksLikeDocumentTitleLine(line: string) {
+  return !/^(?:[#>*-]|\d+\.\s|\|)/.test(line);
+}
+
+function extractDocumentBodyTitle(body: string) {
+  const headingMatch = body.match(/^\s*#\s+(.+?)\s*$/m);
+  if (headingMatch?.[1]) {
+    return normalizeDocumentTitle(headingMatch[1]);
+  }
+
+  const firstContentLine = body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && looksLikeDocumentTitleLine(line));
+  return normalizeDocumentTitle(firstContentLine ?? null);
+}
+
 function dedupePromotions(
   promotions: HeartbeatRunIssueDocumentPromotion[],
 ): HeartbeatRunIssueDocumentPromotion[] {
@@ -65,7 +82,7 @@ function extractTaggedIssueDocuments(summary: string): HeartbeatRunIssueDocument
     if (!body) continue;
     const keyAttr = /(?:^|\s)key="([^"]+)"/i.exec(attrs)?.[1] ?? null;
     const titleAttr = /(?:^|\s)title="([^"]+)"/i.exec(attrs)?.[1] ?? null;
-    const title = normalizeDocumentTitle(titleAttr);
+    const title = normalizeDocumentTitle(titleAttr) ?? extractDocumentBodyTitle(body);
     const key = slugifyDocumentKey(keyAttr ?? title ?? "deliverable");
     promotions.push({ key, title, body });
   }
