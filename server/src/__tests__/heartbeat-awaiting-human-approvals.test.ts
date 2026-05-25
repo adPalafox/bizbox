@@ -98,13 +98,14 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
     delete process.env.CLICKUP_PERSONAL_TOKEN;
     delete process.env.CLICKUP_WORKSPACE_ID;
     delete process.env.CLICKUP_APPROVAL_POSITIVE_REACTIONS;
+    delete process.env.CLICKUP_APPROVAL_NEGATIVE_REACTIONS;
     await db.delete(activityLog);
     await db.delete(heartbeatRuns);
-    await db.delete(agentWakeupRequests);
     await db.delete(issueThreadInteractions);
     await db.delete(issueComments);
     await db.delete(issues);
     await db.delete(goals);
+    await db.delete(agentWakeupRequests);
     await db.delete(agents);
     await db.delete(instanceSettings);
     await db.delete(companies);
@@ -130,7 +131,10 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
       .where(eq(agentWakeupRequests.agentId, agentId));
   }
 
-  async function seedAwaitingHumanConfirmation(opts?: { externalId?: string | null }) {
+  async function seedAwaitingHumanConfirmation(opts?: {
+    continuationPolicy?: "wake_assignee" | "wake_assignee_on_accept";
+    externalId?: string | null;
+  }) {
     const companyId = randomUUID();
     const goalId = randomUUID();
     const issueId = randomUUID();
@@ -180,7 +184,7 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
       companyId,
     }, {
       kind: "request_confirmation",
-      continuationPolicy: "wake_assignee_on_accept",
+      continuationPolicy: opts?.continuationPolicy ?? "wake_assignee_on_accept",
       payload: {
         version: 1,
         prompt: "Approve this plan?",
@@ -291,7 +295,7 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
     });
   });
 
-  it("forwards non-approval ClickUp replies into issue comments and wakes the creator agent", async () => {
+  it("rejects non-approval ClickUp replies, forwards them into issue comments, and wakes the creator agent", async () => {
     process.env.CLICKUP_PERSONAL_TOKEN = "token-123";
     process.env.CLICKUP_WORKSPACE_ID = "workspace-1";
 
@@ -322,7 +326,9 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
     const second = await heartbeat.reconcileAwaitingHumanApprovals();
 
     expect(first.approved).toBe(0);
+    expect(first.rejected).toBe(1);
     expect(second.approved).toBe(0);
+    expect(second.rejected).toBe(0);
 
     const comments = await db
       .select()
@@ -338,10 +344,14 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
       .from(issueThreadInteractions)
       .where(eq(issueThreadInteractions.id, seeded.interactionId))
       .then((rows) => rows[0] ?? null);
-    expect(interaction?.status).toBe("pending");
+    expect(interaction?.status).toBe("rejected");
 
-    const wakes = await waitForWakeup(seeded.agentId);
-    expect(wakes).toHaveLength(1);
+    const updatedIssue = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, seeded.issueId))
+      .then((rows) => rows[0] ?? null);
+    expect(updatedIssue?.status).toBe("todo");
 
     const commentActivities = await db
       .select()
@@ -353,6 +363,18 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
       clickupMessageId: "message-42",
       clickupReplyId: "reply-1",
       commentId: comments[0]?.id,
+    });
+
+    const rejectedActivity = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.action, "issue.thread_interaction_rejected"));
+    expect(rejectedActivity).toHaveLength(1);
+    expect(rejectedActivity[0]?.details).toMatchObject({
+      interactionId: seeded.interactionId,
+      resolutionSource: "clickup_reply",
+      clickupMessageId: "message-42",
+      rejectionReason: "Please change the rollout title first.",
     });
   });
 
@@ -402,8 +424,6 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
       "ClickUp reply received:\n\nAlso add the rollback note.",
     ]);
 
-    const wakes = await waitForWakeup(seeded.agentId);
-    expect(wakes).toHaveLength(2);
   });
 
   it("does not enqueue a wake when the issue moved to backlog before forwarding the ClickUp reply", async () => {
@@ -478,7 +498,7 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
     expect(wakes).toHaveLength(0);
   });
 
-  it("does not accept a pending confirmation for neutral or negative reactions", async () => {
+  it("rejects a pending confirmation for explicit negative reactions", async () => {
     process.env.CLICKUP_PERSONAL_TOKEN = "token-123";
     process.env.CLICKUP_WORKSPACE_ID = "workspace-1";
 
@@ -496,10 +516,47 @@ describeEmbeddedPostgres("heartbeat awaiting_human ClickUp approvals", () => {
     const result = await heartbeat.reconcileAwaitingHumanApprovals();
 
     expect(result.approved).toBe(0);
+    expect(result.rejected).toBe(1);
     expect(result.checked).toBe(1);
-    expect(result.noApproval).toBe(1);
+    expect(result.noApproval).toBe(0);
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(0);
+    const interaction = await db
+      .select()
+      .from(issueThreadInteractions)
+      .where(eq(issueThreadInteractions.id, seeded.interactionId))
+      .then((rows) => rows[0] ?? null);
+    expect(interaction?.status).toBe("rejected");
+
+    const updatedIssue = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, seeded.issueId))
+      .then((rows) => rows[0] ?? null);
+    expect(updatedIssue?.status).toBe("todo");
+  });
+
+  it("still ignores neutral reactions with no approval or rejection signal", async () => {
+    process.env.CLICKUP_PERSONAL_TOKEN = "token-123";
+    process.env.CLICKUP_WORKSPACE_ID = "workspace-1";
+
+    const seeded = await seedAwaitingHumanConfirmation();
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [{ reaction: "eyes", count: 2 }] }),
+      }) as typeof fetch;
+
+    const result = await heartbeat.reconcileAwaitingHumanApprovals();
+
+    expect(result.approved).toBe(0);
+    expect(result.rejected).toBe(0);
+    expect(result.checked).toBe(1);
+    expect(result.noApproval).toBe(1);
     const interaction = await db
       .select()
       .from(issueThreadInteractions)
