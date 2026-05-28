@@ -5,3 +5,76 @@ agents:
       type: codex_local
       config:
         model: gpt-5.4-mini
+    role: ceo
+    capabilities: "Owns strategy, product scope, milestone gates, and cross-functional coordination."
+  tech-lead:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    role: cto
+    reportsTo: ceo
+    capabilities: "Leads architecture, implementation, and technical decision-making for Number Line."
+  fullstack-dev:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    role: engineer
+    reportsTo: tech-lead
+    capabilities: "Implements product features end-to-end (UI/API/storage) with tests."
+  qa:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    role: engineer
+    reportsTo: tech-lead
+    capabilities: "Owns test plans, regression coverage, and release validation."
+  designer:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    role: agent
+    reportsTo: ceo
+    capabilities: "Owns UX/UI flows, visual polish, and design QA."
+  devops-release:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    role: agent
+    reportsTo: tech-lead
+    capabilities: "Coordinates release readiness, CI sanity checks, and shipping checklists."
+  marketing-growth:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    role: cmo
+    reportsTo: ceo
+    capabilities: "Defines positioning, launch plans, and growth experiments."
+  social-content:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    role: agent
+    reportsTo: marketing-growth
+    capabilities: "Creates and ships social content and distribution loops."
+
+projects:
+  number-line:
+    status: active
+    color: "#2563EB"
+    workspaces:
+      app:
+        name: Number Line app
+        sourceType: git_repo
+        repoUrl: "https://github.com/adPalafox/number-line"
+        repoRef: "main"
+        defaultRef: "main"
+        isPrimary: true
+        metadata:
+          localCwdHint: "/Users/adreanpalafox/Documents/number-line"

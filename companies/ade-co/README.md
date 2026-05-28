@@ -1,25 +1,39 @@
 # Ade Co
 
-Ade Co is a barebones agent company package for Codex-local task automation and setup work.
+Ade Co is a startup-style agent company package for building and shipping SaaS/products end-to-end.
 
-It is intentionally minimal: one root company, one CEO/setup lead agent, no projects, and no starter tasks. The goal is to keep the package easy to import, export, and extend later without adding unnecessary structure up front.
+It is designed to support a continuous loop across product planning, engineering, QA, design, release, and growth/marketing—while keeping the **human board in the loop at milestone gates**.
 
 ## Workflow
 
-- Work comes in from the board as setup requests, automation ideas, or package changes.
-- The CEO/setup lead turns that work into concrete package edits, automation setup, or follow-up tasks.
-- If the work grows beyond a single role, the next step is to add a new agent rather than overloading the skeleton.
+- Work arrives from the board as product direction, constraints, or milestone approvals.
+- CEO/PM translates direction into a scoped plan and assigns work across functions.
+- Engineering + Design iterate in tight loops, with QA validating changes.
+- Release/DevOps runs readiness checks and coordinates shipping.
+- Marketing + Social produce content and launch campaigns; they measure outcomes and feed back into product priorities.
 
 ## Org Chart
 
 | Agent | Title | Reports To | Adapter | Model |
 | --- | --- | --- | --- | --- |
-| CEO | Chief Executive Officer | - | `codex_local` | `gpt-5.4-mini` |
+| `ceo` | CEO / Product Lead | - | `codex_local` | `gpt-5.4-mini` |
+| `tech-lead` | Tech Lead | `ceo` | `codex_local` | `gpt-5.4-mini` |
+| `fullstack-dev` | Full-stack Engineer | `tech-lead` | `codex_local` | `gpt-5.4-mini` |
+| `qa` | QA / Test Engineer | `tech-lead` | `codex_local` | `gpt-5.4-mini` |
+| `designer` | Product Designer (UX/UI) | `ceo` | `codex_local` | `gpt-5.4-mini` |
+| `devops-release` | DevOps / Release | `tech-lead` | `codex_local` | `gpt-5.4-mini` |
+| `marketing-growth` | Marketing / Growth | `ceo` | `codex_local` | `gpt-5.4-mini` |
+| `social-content` | Social Media / Content | `marketing-growth` | `codex_local` | `gpt-5.4-mini` |
+
+## Projects
+
+- `number-line`: Number Line app (repo `https://github.com/adPalafox/number-line`)
 
 ## Files
 
 - [`COMPANY.md`](./COMPANY.md) - company metadata and goals
-- [`agents/ceo/AGENTS.md`](./agents/ceo/AGENTS.md) - the single setup lead agent
+- `agents/*/AGENTS.md` - per-agent instructions and milestone gates
+- [`projects/number-line/PROJECT.md`](./projects/number-line/PROJECT.md) - project seed definition
 - [`.paperclip.yaml`](./.paperclip.yaml) - portable Codex-local runtime details
 
 ## Importing
