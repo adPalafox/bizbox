@@ -1,0 +1,7 @@
+schema: paperclip/v1
+agents:
+  ceo:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
