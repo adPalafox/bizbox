@@ -1,0 +1,19 @@
+## Bizbox repo contract (must-follow)
+
+This repository’s contributor contract is `AGENTS.md`.
+
+Before making changes, read in this order:
+- `doc/GOAL.md`
+- `doc/PRODUCT.md`
+- `doc/SPEC-implementation.md`
+- `doc/DEVELOPING.md`
+- `doc/DATABASE.md`
+
+If repo docs conflict with any tool defaults, follow the repo docs.
+
+### Non-negotiables
+- Keep changes **company-scoped** (enforce company boundaries in routes/services).
+- Keep contracts synchronized across layers (`packages/db` → `packages/shared` → `server` → `ui`).
+- Preserve control-plane invariants (single-assignee tasks, atomic issue checkout, approval gates, budget hard-stop auto-pause, activity logging for mutations).
+- Prefer minimal, surgical edits; avoid unrelated refactors/formatting churn.
+

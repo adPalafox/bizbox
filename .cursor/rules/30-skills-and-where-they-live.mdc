@@ -1,0 +1,13 @@
+## Skills and reusable guidance
+
+Repo-local skills live in:
+- `skills/` (portable across tools)
+
+Tool-specific helper skills (may be installed per-tool, but can be read in-repo when present):
+- `.claude/skills/` (Claude-only helpers; do not put general workflow docs here)
+- `.agents/skills/` (maintainer/internal workflows when present)
+
+When you need a skill, prefer:
+- first: repo-local `skills/`
+- then: tool-provided skills (if available in the runtime)
+

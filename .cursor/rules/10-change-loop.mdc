@@ -1,0 +1,19 @@
+## Change loop (shared across Codex/Cursor/Composer)
+
+Follow the repo-native loop described in `doc/CODEX-WORKFLOW.md` (applies to any coding agent).
+
+### Default loop
+- Inspect the relevant boundary before editing.
+- Keep the touch set small and company-scoped.
+- If a contract changes, update affected layers in this order:
+  - `packages/db`
+  - `packages/shared`
+  - `server`
+  - `ui`
+- Prefer shared constants, validators, and types over duplicated locals.
+- Add or update tests near the behavior you changed.
+
+### Placement rules
+- Adapter-specific behavior belongs in `packages/adapters/*` (not `server/` or `ui/`).
+- Use shared API path constants from `packages/shared` instead of handwritten route strings.
+

@@ -1,0 +1,15 @@
+## Verification + policy
+
+### Verification defaults
+- Cheap default: `pnpm test` (Vitest only)
+- Full pre-handoff: `pnpm verify:full`
+- Run browser suites only when explicitly needed:
+  - `pnpm test:e2e`
+  - `pnpm test:release-smoke`
+
+If you cannot run expected verification, say exactly what was not run and why.
+
+### Lockfile policy
+GitHub Actions owns `pnpm-lock.yaml`.
+- Do not commit `pnpm-lock.yaml` in pull requests.
+

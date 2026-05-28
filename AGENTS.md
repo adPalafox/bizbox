@@ -22,6 +22,9 @@ Before making changes, read in this order:
 
 For the repo-native Codex contributor loop, see `doc/CODEX-WORKFLOW.md`.
 
+For Cursor/Composer, repo-local agent guidance is mirrored in `.cursor/rules/`.
+See `doc/AGENT-TOOLING.md` for how we keep Codex and Cursor setups aligned.
+
 ## 3. Repo Map
 
 - `server/`: Express REST API and orchestration services

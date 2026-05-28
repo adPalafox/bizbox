@@ -15,6 +15,15 @@ Current implementation status:
 - Node.js 20+
 - pnpm 9+
 
+## AI Coding Agents (Codex / Cursor / Composer)
+
+This repo keeps the **source-of-truth workflow** in `AGENTS.md` and `doc/CODEX-WORKFLOW.md` (despite the name, it applies to any coding agent).
+
+- Cursor/Composer: repo-local rules live in `.cursor/rules/`
+- Skills intended to be shared across tools live in `skills/`
+
+Details and a portability map (including MCP notes) are in `doc/AGENT-TOOLING.md`.
+
 ## Dependency Lockfile Policy
 
 GitHub Actions owns `pnpm-lock.yaml`.
