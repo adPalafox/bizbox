@@ -50,6 +50,20 @@ To import into a new company name:
 paperclipai company import ./companies/ade-co --target new --new-company-name "Ade Co"
 ```
 
+## Routines (post-import)
+
+Routines are stored in the Paperclip database (not the git package), so they are **not** created by company import.
+
+After importing/updating the company package, apply Ade Co routines:
+
+```sh
+./companies/ade-co/scripts/apply-routines.sh \
+  --company-id "<ADE_CO_COMPANY_ID>" \
+  --paperclip-url "http://localhost:3100"
+```
+
+This creates (or updates) the daily **5pm Asia/Manila** iteration routine for the `number-line` project.
+
 ## References
 
 - [Agent Companies specification](https://agentcompanies.io/specification)

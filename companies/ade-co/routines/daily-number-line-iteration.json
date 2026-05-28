@@ -1,0 +1,11 @@
+{
+  "title": "Daily Number Line iteration",
+  "priority": "medium",
+  "status": "active",
+  "concurrencyPolicy": "coalesce_if_active",
+  "catchUpPolicy": "skip_missed",
+  "timezone": "Asia/Manila",
+  "cronExpression": "0 17 * * *",
+  "triggerLabel": "Daily 5pm Asia/Manila",
+  "description": "Daily iteration loop for Number Line. Local repo cwd: /Users/adreanpalafox/Documents/number-line (git remote: https://github.com/adPalafox/number-line).\n\nLoop (run each day):\n1) Sync: cd to local repo, git status, git fetch, pull/rebase as appropriate.\n2) Review: read current project board/issues; pick 1-3 highest-leverage items; define today's outcome.\n3) Plan gate (HUMAN SIGN-OFF): if scope/strategy changes, draft plan + ask human approval before major direction changes.\n4) Design gate (HUMAN SIGN-OFF): if UX/UI changes, propose design + acceptance criteria; wait for approval before implementing.\n5) Build: implement smallest slice, keep commits small, run tests/lint, update docs.\n6) QA gate (HUMAN SIGN-OFF): create/execute test plan; request approval before release.\n7) Release gate (HUMAN SIGN-OFF): tag/release/deploy steps; verify smoke checks.\n8) Marketing gate (HUMAN SIGN-OFF): draft announcement/social posts and distribution checklist; wait approval before publishing.\n9) Wrap: summarize progress, blockers, next-day plan; ensure repo clean."
+}
