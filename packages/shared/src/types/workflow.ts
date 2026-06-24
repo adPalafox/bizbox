@@ -1,3 +1,5 @@
+import type { WorkflowTriggerLineage } from "./workflow-trigger.js";
+
 export interface WorkflowPipelinePhase {
   key: string;
   label: string;
@@ -56,6 +58,7 @@ export interface WorkflowRun {
   stderrExcerpt: string | null;
   consoleEntries: WorkflowRunConsoleChunk[];
   contextSnapshot: Record<string, unknown> | null;
+  workflowTrigger?: WorkflowTriggerLineage | null;
   startedAt: Date | null;
   finishedAt: Date | null;
   createdAt: Date;

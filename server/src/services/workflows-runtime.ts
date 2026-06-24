@@ -702,6 +702,7 @@ _API_BASE = os.environ.get("BIZBOX_API_URL", "").rstrip("/")
 _RUN_ID = os.environ.get("BIZBOX_WORKFLOW_RUN_ID", "")
 _TOKEN = os.environ.get("BIZBOX_WORKFLOW_RUN_TOKEN", "")
 _AGENT_PHASES = json.loads(os.environ.get("BIZBOX_WORKFLOW_AGENT_PHASES", "{}") or "{}")
+_WORKFLOW_TRIGGER_JSON = os.environ.get("BIZBOX_WORKFLOW_TRIGGER_JSON", "")
 
 def _request(method, path, payload=None):
     data = None
@@ -729,6 +730,14 @@ def _safe_emit_phase(key, label, status, metadata=None):
         _emit_phase(key, label, status, metadata)
     except Exception:
         pass
+
+def workflow_trigger():
+    if not _WORKFLOW_TRIGGER_JSON:
+        return None
+    try:
+        return json.loads(_WORKFLOW_TRIGGER_JSON)
+    except Exception:
+        return None
 
 def _phase_info_for_agent(agent):
     name = getattr(agent, "name", None)
@@ -892,6 +901,7 @@ def workflow_input(prompt=""):
         poll_delay = min(poll_delay * 1.5, 10.0)
 
 builtins.input = workflow_input
+builtins.workflow_trigger = workflow_trigger
 
 try:
     from google.adk.agents import BaseAgent as _BizboxBaseAgent
@@ -941,6 +951,7 @@ export async function prepareInstrumentedWorkflowRuntime(input: {
   runnerConfig: Record<string, unknown>;
   analysis: AnalyzedWorkflowProject;
   runToken: string;
+  workflowTriggerJson?: unknown;
 }) : Promise<PreparedWorkflowRuntime> {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), `bizbox-workflow-${input.runId}-`));
   const copiedRoot = path.join(tempRoot, "project");
@@ -985,6 +996,9 @@ export async function prepareInstrumentedWorkflowRuntime(input: {
     PYTHONPATH: [tempRoot, existingPythonPath].filter(Boolean).join(path.delimiter),
     BIZBOX_WORKFLOW_RUN_ID: input.runId,
     BIZBOX_WORKFLOW_RUN_TOKEN: input.runToken,
+    ...(input.workflowTriggerJson ? {
+      BIZBOX_WORKFLOW_TRIGGER_JSON: JSON.stringify(input.workflowTriggerJson),
+    } : {}),
     BIZBOX_WORKFLOW_AGENT_PHASES: JSON.stringify(
       Object.fromEntries(
         input.analysis.pipelineDefinition.phases

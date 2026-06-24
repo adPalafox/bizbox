@@ -80,6 +80,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
+import { WorkflowTriggerLineageCard } from "../components/WorkflowTriggerLineageCard";
 import {
   isUuidLike,
   type Agent,
@@ -3431,6 +3432,10 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType, adapterConfig }
             )}
           </div>
         )}
+
+      {run.workflowTrigger ? (
+        <WorkflowTriggerLineageCard trigger={run.workflowTrigger} />
+      ) : null}
       </div>
 
       {/* Issues touched by this run */}
