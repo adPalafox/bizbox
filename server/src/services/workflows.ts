@@ -26,6 +26,7 @@ import type {
   WorkflowRunConsoleChunk,
   WorkflowRunDetail,
   WorkflowRunUsage,
+  WorkflowTriggerLineage,
 } from "@paperclipai/shared";
 import { unprocessable } from "../errors.js";
 import { logger } from "../middleware/logger.js";
@@ -94,6 +95,109 @@ function readWorkflowRunResultJson(contextSnapshot: Record<string, unknown> | nu
   return value && typeof value === "object" ? value as Record<string, unknown> : null;
 }
 
+function readDateLike(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function readWorkflowTriggerContext(contextSnapshot: Record<string, unknown> | null): WorkflowTriggerLineage | null {
+  const raw = contextSnapshot?.workflowTrigger;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const artifactId = typeof record.artifactId === "string" ? record.artifactId : "";
+  const sourceHeartbeatRunId = typeof record.sourceHeartbeatRunId === "string" ? record.sourceHeartbeatRunId : "";
+  const sourceAgentId = typeof record.sourceAgentId === "string" ? record.sourceAgentId : "";
+  const sourceHeartbeatRunStatus = typeof record.sourceHeartbeatRunStatus === "string" ? record.sourceHeartbeatRunStatus : "";
+  const contractKey = typeof record.contractKey === "string" ? record.contractKey : "";
+  const contractVersion = typeof record.contractVersion === "string" ? record.contractVersion : "";
+  const payloadHash = typeof record.payloadHash === "string" ? record.payloadHash : "";
+  const payloadBytes = typeof record.payloadBytes === "number" && Number.isFinite(record.payloadBytes)
+    ? record.payloadBytes
+    : null;
+  const validationStatus = record.validationStatus === "passed" || record.validationStatus === "failed"
+    ? record.validationStatus
+    : null;
+  const triggerStatus = record.triggerStatus === "not_triggered" || record.triggerStatus === "triggering" || record.triggerStatus === "triggered" || record.triggerStatus === "failed"
+    ? record.triggerStatus
+    : null;
+  const payload = record.payload && typeof record.payload === "object" && !Array.isArray(record.payload)
+    ? record.payload as Record<string, unknown>
+    : null;
+  if (
+    !artifactId ||
+    !sourceHeartbeatRunId ||
+    !sourceAgentId ||
+    !sourceHeartbeatRunStatus ||
+    !contractKey ||
+    !contractVersion ||
+    !payloadHash ||
+    payloadBytes === null ||
+    validationStatus === null ||
+    triggerStatus === null ||
+    !payload
+  ) {
+    return null;
+  }
+  const createdAt = readDateLike(record.createdAt) ?? new Date(0);
+  const updatedAt = readDateLike(record.updatedAt) ?? createdAt;
+  return {
+    artifactId,
+    sourceHeartbeatRunId,
+    sourceAgentId,
+    sourceHeartbeatRunStatus,
+    targetWorkflowId: typeof record.targetWorkflowId === "string" ? record.targetWorkflowId : null,
+    contractKey,
+    contractVersion,
+    payloadHash,
+    payloadBytes,
+    validationStatus,
+    validationError: typeof record.validationError === "string" ? record.validationError : null,
+    triggerStatus,
+    triggerError: typeof record.triggerError === "string" ? record.triggerError : null,
+    triggeredWorkflowRunId: typeof record.triggeredWorkflowRunId === "string" ? record.triggeredWorkflowRunId : null,
+    payload,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function serializeWorkflowTriggerContext(workflowTrigger: WorkflowTriggerLineage) {
+  return {
+    ...workflowTrigger,
+    createdAt: workflowTrigger.createdAt.toISOString(),
+    updatedAt: workflowTrigger.updatedAt.toISOString(),
+  };
+}
+
+function buildWorkflowTriggerInputMarkdown(workflowTitle: string, workflowTrigger: WorkflowTriggerLineage) {
+  const payloadJson = JSON.stringify(workflowTrigger.payload, null, 2);
+  const payloadBlock = payloadJson.length > 40_000
+    ? `${payloadJson.slice(0, 40_000)}\n…`
+    : payloadJson;
+  const statusLine = workflowTrigger.validationError
+    ? `${workflowTrigger.validationStatus} (${workflowTrigger.validationError})`
+    : workflowTrigger.validationStatus;
+  return [
+    `# Workflow Trigger Input`,
+    "",
+    `Workflow: ${workflowTitle}`,
+    `Contract: ${workflowTrigger.contractKey}@${workflowTrigger.contractVersion}`,
+    `Source agent: ${workflowTrigger.sourceAgentId}`,
+    `Source heartbeat run: ${workflowTrigger.sourceHeartbeatRunId}`,
+    `Artifact: ${workflowTrigger.artifactId}`,
+    `Validation: ${statusLine}`,
+    `Trigger status: ${workflowTrigger.triggerStatus}`,
+    `Payload hash: ${workflowTrigger.payloadHash}`,
+    `Payload bytes: ${workflowTrigger.payloadBytes}`,
+    "",
+    "## Structured payload",
+    "```json",
+    payloadBlock,
+    "```",
+  ].join("\n");
+}
+
 // Server-side filesystem paths stored in contextSnapshot must not be exposed to clients.
 const CONTEXT_SNAPSHOT_SERVER_KEYS = ["tempRoot", "copiedAgentPath", "runtimeRoot"] as const;
 
@@ -122,6 +226,7 @@ function toWorkflowRun(row: typeof workflowRuns.$inferSelect): WorkflowRun {
     stderrExcerpt: readWorkflowRunExcerpt(contextSnapshot, "stderrExcerpt"),
     consoleEntries: readWorkflowRunConsoleEntries(contextSnapshot),
     contextSnapshot: clientContextSnapshot,
+    workflowTrigger: readWorkflowTriggerContext(contextSnapshot),
     startedAt: row.startedAt ?? null,
     finishedAt: row.finishedAt ?? null,
     createdAt: row.createdAt,
@@ -331,6 +436,51 @@ async function createWorkflowArtifactDeliverables(
   }
 }
 
+async function createWorkflowRunRecord(input: {
+  db: Db;
+  workflowRow: typeof workflows.$inferSelect;
+  analysis: Awaited<ReturnType<typeof analyzeWorkflowProject>>;
+  inputMarkdown: string;
+  contextSnapshot?: Record<string, unknown> | null;
+}) {
+  const runRow = await input.db.insert(workflowRuns).values({
+    companyId: input.workflowRow.companyId,
+    workflowId: input.workflowRow.id,
+    status: "queued",
+    inputMarkdown: input.inputMarkdown,
+    contextSnapshot: input.contextSnapshot ?? null,
+  }).returning().then((rows) => rows[0] ?? null);
+  if (!runRow) return null;
+  const phases = input.analysis.pipelineDefinition.phases;
+  if (phases.length > 0) {
+    try {
+      await input.db.insert(workflowRunPhases).values(
+        phases.map((phase: typeof phases[number]) => ({
+          companyId: input.workflowRow.companyId,
+          workflowRunId: runRow.id,
+          phaseKey: phase.key,
+          label: phase.label,
+          kind: phase.kind,
+          ordinal: phase.ordinal,
+          status: "idle",
+          metadata: {
+            filePath: phase.filePath,
+            functionName: phase.functionName,
+            parentKey: phase.parentKey ?? null,
+            depth: phase.depth ?? 0,
+            agentName: phase.agentName ?? null,
+            description: phase.description ?? null,
+          },
+        })),
+      );
+    } catch (err) {
+      await input.db.delete(workflowRuns).where(eq(workflowRuns.id, runRow.id)).catch(() => {});
+      throw err;
+    }
+  }
+  return runRow;
+}
+
 export function workflowService(db: Db) {
   const storage = getStorageService();
 
@@ -395,16 +545,21 @@ export function workflowService(db: Db) {
       },
       analysis,
       runToken,
+      workflowTriggerJson: readWorkflowTriggerContext(runRow.contextSnapshot),
     });
 
+    const baseContextSnapshot = (runRow.contextSnapshot as Record<string, unknown> | null) ?? {};
     const contextSnapshot: Record<string, unknown> = {
+      ...baseContextSnapshot,
       runtimeRoot: prepared.runtimeRoot,
       tempRoot: prepared.tempRoot,
       copiedAgentPath: prepared.copiedAgentPath,
-      consoleEntries: [] satisfies WorkflowRunConsoleChunk[],
-      stdoutExcerpt: "",
-      stderrExcerpt: "",
-      resultJson: null,
+      consoleEntries: Array.isArray(baseContextSnapshot.consoleEntries)
+        ? baseContextSnapshot.consoleEntries as WorkflowRunConsoleChunk[]
+        : [],
+      stdoutExcerpt: typeof baseContextSnapshot.stdoutExcerpt === "string" ? baseContextSnapshot.stdoutExcerpt : "",
+      stderrExcerpt: typeof baseContextSnapshot.stderrExcerpt === "string" ? baseContextSnapshot.stderrExcerpt : "",
+      resultJson: baseContextSnapshot.resultJson ?? null,
     };
 
     // try/finally starts here — before the DB update — so that temp directories
@@ -578,7 +733,7 @@ export function workflowService(db: Db) {
     }
   }
 
-  return {
+    return {
     failInterruptedActiveRuns: async () => {
       const now = new Date();
       const candidates = await db
@@ -724,40 +879,13 @@ export function workflowService(db: Db) {
       }
       assertWorkflowRuntimeJwtConfigured();
       const refreshed = await refreshWorkflowAnalysis(workflowRow);
-      const runRow = await db.insert(workflowRuns).values({
-        companyId: workflowRow.companyId,
-        workflowId,
-        status: "queued",
+      const runRow = await createWorkflowRunRecord({
+        db,
+        workflowRow,
         inputMarkdown: input.inputMarkdown,
-      }).returning().then((rows) => rows[0] ?? null);
+        analysis: refreshed.analysis,
+      });
       if (!runRow) throw unprocessable("Failed to create workflow run");
-      const phases = refreshed.analysis.pipelineDefinition.phases;
-      if (phases.length > 0) {
-        try {
-          await db.insert(workflowRunPhases).values(
-            phases.map((phase: typeof phases[number]) => ({
-              companyId: workflowRow.companyId,
-              workflowRunId: runRow.id,
-              phaseKey: phase.key,
-              label: phase.label,
-              kind: phase.kind,
-              ordinal: phase.ordinal,
-              status: "idle",
-              metadata: {
-                filePath: phase.filePath,
-                functionName: phase.functionName,
-                parentKey: phase.parentKey ?? null,
-                depth: phase.depth ?? 0,
-                agentName: phase.agentName ?? null,
-                description: phase.description ?? null,
-              },
-            })),
-          );
-        } catch (err) {
-          await db.delete(workflowRuns).where(eq(workflowRuns.id, runRow.id)).catch(() => {});
-          throw err;
-        }
-      }
       void executeRun(runRow.id, {
         workflow: refreshed.workflow,
         analysis: refreshed.analysis,
@@ -771,6 +899,59 @@ export function workflowService(db: Db) {
         logger.error({ err, runId: runRow.id, workflowId }, "workflow execution failed");
       });
       return toWorkflowRun(runRow);
+    },
+
+    runFromTrigger: async (
+      workflowId: string,
+      input: {
+        workflowTrigger: WorkflowTriggerLineage;
+        inputMarkdown?: string;
+      },
+    ) => {
+      const workflowRow = await db.select().from(workflows).where(eq(workflows.id, workflowId)).then((rows) => rows[0] ?? null);
+      if (!workflowRow) {
+        throw unprocessable("Workflow not found");
+      }
+      assertWorkflowRuntimeJwtConfigured();
+      const refreshed = await refreshWorkflowAnalysis(workflowRow);
+      const runRow = await createWorkflowRunRecord({
+        db,
+        workflowRow,
+        inputMarkdown: input.inputMarkdown ?? buildWorkflowTriggerInputMarkdown(workflowRow.title, input.workflowTrigger),
+        analysis: refreshed.analysis,
+        contextSnapshot: {
+          workflowTrigger: serializeWorkflowTriggerContext(input.workflowTrigger),
+        },
+      });
+      if (!runRow) throw unprocessable("Failed to create workflow run");
+      const finalWorkflowTrigger = {
+        ...serializeWorkflowTriggerContext(input.workflowTrigger),
+        targetWorkflowId: workflowRow.id,
+        triggeredWorkflowRunId: runRow.id,
+        triggerStatus: "triggered",
+      };
+      const nextContextSnapshot = {
+        ...((runRow.contextSnapshot as Record<string, unknown> | null) ?? {}),
+        workflowTrigger: finalWorkflowTrigger,
+      };
+      await db.update(workflowRuns).set({
+        contextSnapshot: nextContextSnapshot,
+        updatedAt: new Date(),
+      }).where(eq(workflowRuns.id, runRow.id));
+      const refreshedRunRow = (await db.select().from(workflowRuns).where(eq(workflowRuns.id, runRow.id)).then((rows) => rows[0] ?? null)) ?? runRow;
+      void executeRun(runRow.id, {
+        workflow: refreshed.workflow,
+        analysis: refreshed.analysis,
+      }).catch((err) => {
+        void db.update(workflowRuns).set({
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+          finishedAt: new Date(),
+          updatedAt: new Date(),
+        }).where(and(eq(workflowRuns.id, runRow.id), notInArray(workflowRuns.status, ["succeeded", "failed", "cancelled"])));
+        logger.error({ err, runId: runRow.id, workflowId }, "workflow execution failed");
+      });
+      return toWorkflowRun(refreshedRunRow);
     },
 
     getRunDetail: async (runId: string): Promise<WorkflowRunDetail | null> => {

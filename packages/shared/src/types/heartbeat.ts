@@ -7,6 +7,7 @@ import type {
   WakeupTriggerDetail,
   WakeupRequestStatus,
 } from "../constants.js";
+import type { WorkflowTriggerLineage } from "./workflow-trigger.js";
 
 export interface HeartbeatRun {
   id: string;
@@ -49,6 +50,7 @@ export interface HeartbeatRun {
   lastUsefulActionAt: Date | null;
   nextAction: string | null;
   contextSnapshot: Record<string, unknown> | null;
+  workflowTrigger?: WorkflowTriggerLineage | null;
   createdAt: Date;
   updatedAt: Date;
 }

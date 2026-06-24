@@ -99,6 +99,7 @@ import { documentService } from "./documents.js";
 import { workProductService } from "./work-products.js";
 import { awaitingHumanBridgeService } from "./awaiting-human-bridge.js";
 import { workflowHandoffBridgeService } from "./workflow-handoff-bridge.js";
+import { workflowTriggerBridgeService } from "./workflow-trigger-bridge.js";
 import { awaitingHumanSettingsService } from "./awaiting-human-settings.js";
 import {
   hasAnyAwaitingHumanBridgeAdapter,
@@ -564,6 +565,7 @@ const heartbeatRunListColumns = {
   continuationAttempt: heartbeatRuns.continuationAttempt,
   lastUsefulActionAt: heartbeatRuns.lastUsefulActionAt,
   nextAction: heartbeatRuns.nextAction,
+  workflowTrigger: sql<Record<string, unknown> | null>`${heartbeatRuns.contextSnapshot} -> 'workflowTrigger'`.as("workflowTrigger"),
   createdAt: heartbeatRuns.createdAt,
   updatedAt: heartbeatRuns.updatedAt,
 } as const;
@@ -639,6 +641,7 @@ const heartbeatRunSafeColumns = {
   ...getTableColumns(heartbeatRuns),
   processGroupId: heartbeatRunProcessGroupIdColumn,
   resultJson: heartbeatRunSafeResultJsonColumn,
+  workflowTrigger: sql<Record<string, unknown> | null>`${heartbeatRuns.contextSnapshot} -> 'workflowTrigger'`.as("workflowTrigger"),
 } as const;
 
 const heartbeatRunSqlAsciiSafeColumns = {
@@ -648,6 +651,7 @@ const heartbeatRunSqlAsciiSafeColumns = {
   resultJson: sql<Record<string, unknown> | null>`NULL`.as("resultJson"),
   stdoutExcerpt: sql<string | null>`NULL`.as("stdoutExcerpt"),
   stderrExcerpt: sql<string | null>`NULL`.as("stderrExcerpt"),
+  workflowTrigger: sql<Record<string, unknown> | null>`${heartbeatRuns.contextSnapshot} -> 'workflowTrigger'`.as("workflowTrigger"),
 } as const;
 
 const heartbeatRunLogAccessColumns = {
@@ -2120,6 +2124,7 @@ export function heartbeatService(db: Db) {
     },
   });
   const workflowHandoffBridge = workflowHandoffBridgeService(db);
+  const workflowTriggerBridge = workflowTriggerBridgeService(db);
   const executionWorkspacesSvc = executionWorkspaceService(db);
   const environmentsSvc = environmentService(db);
   const workspaceOperationsSvc = workspaceOperationService(db);
@@ -6642,6 +6647,13 @@ export function heartbeatService(db: Db) {
         await finalizeIssueCommentPolicy(livenessRun, agent);
         await releaseIssueExecutionAndPromote(livenessRun);
         await handleRunLivenessContinuation(livenessRun);
+        if (outcome === "succeeded") {
+          try {
+            await workflowTriggerBridge.processCompletedHeartbeatRun(livenessRun);
+          } catch (err) {
+            logger.warn({ err, runId: livenessRun.id }, "failed to process workflow trigger bridge");
+          }
+        }
       }
 
       if (finalizedRun) {

@@ -149,6 +149,22 @@ export {
   type PostAgentThreadMessage,
   type MarkAgentThreadRead,
 } from "./agent-thread.js";
+export {
+  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY,
+  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION,
+  WORKFLOW_TRIGGER_PAYLOAD_MAX_BYTES,
+  weeklyRetroWorkflowTriggerPayloadSchema,
+  workflowTriggerEnvelopeSchema,
+  resolveWorkflowTriggerPayloadSchema,
+  getWorkflowTriggerPayloadBytes,
+  validateWorkflowTrigger,
+  type WeeklyRetroWorkflowTriggerEvidenceReference,
+  type WeeklyRetroWorkflowTriggerPayload,
+  type WeeklyRetroWorkflowTriggerSection,
+  type WorkflowTriggerEnvelope,
+  type WorkflowTriggerLineage,
+  type WorkflowTriggerValidationResult,
+} from "./workflow-trigger.js";
 
 export {
   createProjectSchema,

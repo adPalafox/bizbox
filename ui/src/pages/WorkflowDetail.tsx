@@ -45,6 +45,7 @@ import {
   createWorkflowPromptTemplateDraft,
 } from "../components/WorkflowPromptTemplatesEditor";
 import { WorkflowRunPromptSuggestions } from "../components/WorkflowRunPromptSuggestions";
+import { WorkflowTriggerLineageCard } from "../components/WorkflowTriggerLineageCard";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCompany } from "../context/CompanyContext";
 import { useToastActions } from "../context/ToastContext";
@@ -1755,6 +1756,10 @@ function WorkflowRunConsoleCard({
               </div>
             ) : null}
           </div>
+        ) : null}
+
+        {runDetail.workflowTrigger ? (
+          <WorkflowTriggerLineageCard trigger={runDetail.workflowTrigger} title="Trigger lineage" />
         ) : null}
       </CardContent>
     </Card>
