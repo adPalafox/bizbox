@@ -26,8 +26,8 @@ import type {
   WorkflowRunConsoleChunk,
   WorkflowRunDetail,
   WorkflowRunUsage,
-  WorkflowTriggerLineage,
 } from "@paperclipai/shared";
+import type { WorkflowTriggerLineage } from "@paperclipai/shared/types/workflow-trigger";
 import { unprocessable } from "../errors.js";
 import { logger } from "../middleware/logger.js";
 import { getStorageService } from "../storage/index.js";

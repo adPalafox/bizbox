@@ -1,13 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { heartbeatRuns, workflowTriggerArtifacts, workflows } from "@paperclipai/db";
+import type { WorkflowTriggerLineage } from "@paperclipai/shared/types/workflow-trigger";
 import {
   validateWorkflowTrigger,
   workflowTriggerContractRegistry,
   workflowTriggerEnvelopeSchema,
   type WorkflowTriggerContractRegistry,
-  type WorkflowTriggerLineage,
-} from "@paperclipai/shared";
+} from "@paperclipai/shared/validators/workflow-trigger";
 import { logger } from "../middleware/logger.js";
 import { logActivity } from "./activity-log.js";
 import { workflowService } from "./workflows.js";
