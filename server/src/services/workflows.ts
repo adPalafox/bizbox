@@ -545,7 +545,7 @@ export function workflowService(db: Db) {
       },
       analysis,
       runToken,
-      workflowTriggerJson: readWorkflowTriggerContext(runRow.contextSnapshot),
+      workflowTriggerJson: readWorkflowTriggerContext((runRow.contextSnapshot as Record<string, unknown> | null) ?? null),
     });
 
     const baseContextSnapshot = (runRow.contextSnapshot as Record<string, unknown> | null) ?? {};

@@ -1,29 +1,29 @@
-export const WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY = "weekly-retro-context" as const;
-export const WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION = "1" as const;
+export const WORKFLOW_TRIGGER_CONTEXT_CONTRACT_KEY = "workflow-trigger-context" as const;
+export const WORKFLOW_TRIGGER_CONTEXT_CONTRACT_VERSION = "1" as const;
 
-export interface WeeklyRetroWorkflowTriggerEvidenceReference {
+export interface WorkflowTriggerEvidenceReference {
   key: string;
   title: string;
   url: string | null;
   note: string | null;
 }
 
-export interface WeeklyRetroWorkflowTriggerSection {
+export interface WorkflowTriggerSection {
   key: string;
   title: string;
   summaryMarkdown: string;
   evidenceRefs: string[];
 }
 
-export interface WeeklyRetroWorkflowTriggerPayload {
+export interface WorkflowTriggerPayload {
   generatedAt: string;
   evidenceWindow: {
     startAt: string;
     endAt: string;
   };
   summaryMarkdown: string;
-  sections: WeeklyRetroWorkflowTriggerSection[];
-  evidence: WeeklyRetroWorkflowTriggerEvidenceReference[];
+  sections: WorkflowTriggerSection[];
+  evidence: WorkflowTriggerEvidenceReference[];
 }
 
 export interface WorkflowTriggerEnvelope {

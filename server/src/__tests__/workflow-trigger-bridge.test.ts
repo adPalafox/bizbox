@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
   activityLog,
   agents,
@@ -100,7 +101,13 @@ vi.mock("../workflow-run-jwt.js", () => ({
   verifyWorkflowRunJwt: vi.fn(),
 }));
 
-import { workflowTriggerBridgeService } from "../services/workflow-trigger-bridge.ts";
+import {
+  workflowTriggerBridgeService,
+} from "../services/workflow-trigger-bridge.ts";
+import {
+  type WorkflowTriggerContractDefinition,
+  type WorkflowTriggerContractRegistry,
+} from "@paperclipai/shared";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -111,28 +118,33 @@ if (!embeddedPostgresSupport.supported) {
   );
 }
 
+const projectStatusWorkflowTriggerContractDefinition = {
+  contractKey: "project-status-context",
+  contractVersion: "1",
+  payloadSchema: z.object({
+    generatedAt: z.string().trim().min(1).datetime(),
+    projectKey: z.string().trim().min(1).max(200),
+    statusMarkdown: z.string().min(1).max(100_000),
+    notes: z.array(z.object({
+      key: z.string().trim().min(1).max(255),
+      title: z.string().trim().min(1).max(500),
+    }).passthrough()).default([]),
+  }).passthrough(),
+} satisfies WorkflowTriggerContractDefinition;
+
+const contractRegistry: WorkflowTriggerContractRegistry = [
+  projectStatusWorkflowTriggerContractDefinition,
+];
+
 function buildWorkflowTriggerPayload() {
   return {
     generatedAt: "2026-06-24T00:00:00.000Z",
-    evidenceWindow: {
-      startAt: "2026-06-17T00:00:00.000Z",
-      endAt: "2026-06-24T00:00:00.000Z",
-    },
-    summaryMarkdown: "Weekly retro summary",
-    sections: [
+    projectKey: "project-alpha",
+    statusMarkdown: "Project is green.",
+    notes: [
       {
-        key: "wins",
-        title: "Wins",
-        summaryMarkdown: "What went well.",
-        evidenceRefs: ["doc-1"],
-      },
-    ],
-    evidence: [
-      {
-        key: "doc-1",
-        title: "Evidence one",
-        url: "https://example.com/evidence",
-        note: "Curated from source material.",
+        key: "note-1",
+        title: "Reconciled inputs",
       },
     ],
   };
@@ -152,7 +164,7 @@ async function insertHeartbeatRun(db: ReturnType<typeof createDb>, input: {
     triggerDetail: "system",
     status: "succeeded",
     resultJson: {
-      summary: "weekly retro ready",
+      summary: "workflow trigger ready",
       workflowTrigger: input.workflowTrigger,
     },
     createdAt: new Date(),
@@ -180,10 +192,10 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     await db.delete(workflowTriggerArtifacts);
     await db.delete(workflowRunPhases);
     await db.delete(workflowRuns);
+    await db.delete(activityLog);
     await db.delete(heartbeatRuns);
     await db.delete(workflows);
     await db.delete(agents);
-    await db.delete(activityLog);
     await db.delete(companies);
   });
 
@@ -197,18 +209,17 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     const agentId = randomUUID();
     const workflowId = randomUUID();
     const heartbeatRun = randomUUID();
-    const payload = buildWorkflowTriggerPayload();
 
     await db.insert(companies).values({
       id: companyId,
-      name: "Retro Co",
-      issuePrefix: `RET${companyId.slice(0, 3)}`,
+      name: "Status Co",
+      issuePrefix: `STS${companyId.slice(0, 3)}`,
       requireBoardApprovalForNewAgents: false,
     });
     await db.insert(agents).values({
       id: agentId,
       companyId,
-      name: "Retro Gatherer",
+      name: "Status Gatherer",
       role: "writer",
       status: "idle",
       adapterType: "openclaw_gateway",
@@ -217,12 +228,12 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     await db.insert(workflows).values({
       id: workflowId,
       companyId,
-      title: "Weekly retro",
+      title: "Project status digest",
       status: "active",
       runnerType: "google_adk",
       runnerConfig: {
         agentPath: "/tmp/agent.py",
-        inputContractKey: "weekly-retro-context",
+        inputContractKey: "project-status-context",
         inputContractVersion: "1",
       },
       pipelineDefinition: { entrypoint: "agent.py", generatedAt: new Date(0).toISOString(), phases: [] },
@@ -236,14 +247,14 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
       triggerDetail: "system",
       status: "succeeded",
       resultJson: {
-        summary: "weekly retro ready",
+        summary: "workflow trigger ready",
         workflowTrigger: {
           companyId,
           sourceHeartbeatRunId: heartbeatRun,
-          contractKey: "weekly-retro-context",
-          contractVersion: "1",
+          contractKey: projectStatusWorkflowTriggerContractDefinition.contractKey,
+          contractVersion: projectStatusWorkflowTriggerContractDefinition.contractVersion,
           generatedAt: "2026-06-24T00:00:00.000Z",
-          payload,
+          payload: buildWorkflowTriggerPayload(),
         },
       },
       createdAt: new Date(),
@@ -254,7 +265,7 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     const run = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, heartbeatRun)).then((rows) => rows[0] ?? null);
     expect(run).not.toBeNull();
 
-    await workflowTriggerBridgeService(db).processCompletedHeartbeatRun(run!);
+    await workflowTriggerBridgeService(db, { contractRegistry }).processCompletedHeartbeatRun(run!);
 
     await vi.waitFor(async () => {
       const persisted = await db.select().from(workflowRuns).where(eq(workflowRuns.workflowId, workflowId)).then((rows) => rows[0] ?? null);
@@ -270,7 +281,7 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     expect(artifact?.validationStatus).toBe("passed");
     expect(artifact?.triggerStatus).toBe("triggered");
     expect(artifact?.payloadJson).toMatchObject({
-      summaryMarkdown: "Weekly retro summary",
+      projectKey: "project-alpha",
     });
 
     const workflowRun = await db
@@ -317,14 +328,14 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
 
     await db.insert(companies).values({
       id: companyId,
-      name: "Retro Co",
-      issuePrefix: `RET${companyId.slice(0, 3)}`,
+      name: "Status Co",
+      issuePrefix: `STS${companyId.slice(0, 3)}`,
       requireBoardApprovalForNewAgents: false,
     });
     await db.insert(agents).values({
       id: agentId,
       companyId,
-      name: "Retro Gatherer",
+      name: "Status Gatherer",
       role: "writer",
       status: "idle",
       adapterType: "openclaw_gateway",
@@ -333,12 +344,12 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     await db.insert(workflows).values({
       id: workflowId,
       companyId,
-      title: "Weekly retro",
+      title: "Project status digest",
       status: "active",
       runnerType: "google_adk",
       runnerConfig: {
         agentPath: "/tmp/agent.py",
-        inputContractKey: "weekly-retro-context",
+        inputContractKey: "project-status-context",
         inputContractVersion: "1",
       },
       pipelineDefinition: { entrypoint: "agent.py", generatedAt: new Date(0).toISOString(), phases: [] },
@@ -352,19 +363,16 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
       triggerDetail: "system",
       status: "succeeded",
       resultJson: {
-        summary: "weekly retro ready",
+        summary: "workflow trigger ready",
         workflowTrigger: {
           companyId,
           sourceHeartbeatRunId: heartbeatRun,
-          contractKey: "weekly-retro-context",
-          contractVersion: "1",
+          contractKey: projectStatusWorkflowTriggerContractDefinition.contractKey,
+          contractVersion: projectStatusWorkflowTriggerContractDefinition.contractVersion,
           generatedAt: "2026-06-24T00:00:00.000Z",
           payload: {
             generatedAt: "2026-06-24T00:00:00.000Z",
-            evidenceWindow: {
-              startAt: "2026-06-17T00:00:00.000Z",
-              endAt: "2026-06-24T00:00:00.000Z",
-            },
+            projectKey: "project-alpha",
           },
         },
       },
@@ -376,7 +384,7 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     const run = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, heartbeatRun)).then((rows) => rows[0] ?? null);
     expect(run).not.toBeNull();
 
-    await workflowTriggerBridgeService(db).processCompletedHeartbeatRun(run!);
+    await workflowTriggerBridgeService(db, { contractRegistry }).processCompletedHeartbeatRun(run!);
 
     const artifacts = await db
       .select()
@@ -398,18 +406,17 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     const agentId = randomUUID();
     const workflowId = randomUUID();
     const heartbeatRun = randomUUID();
-    const payload = buildWorkflowTriggerPayload();
 
     await db.insert(companies).values({
       id: companyId,
-      name: "Retro Co",
-      issuePrefix: `RET${companyId.slice(0, 3)}`,
+      name: "Status Co",
+      issuePrefix: `STS${companyId.slice(0, 3)}`,
       requireBoardApprovalForNewAgents: false,
     });
     await db.insert(agents).values({
       id: agentId,
       companyId,
-      name: "Retro Gatherer",
+      name: "Status Gatherer",
       role: "writer",
       status: "idle",
       adapterType: "openclaw_gateway",
@@ -418,12 +425,12 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     await db.insert(workflows).values({
       id: workflowId,
       companyId,
-      title: "Weekly retro",
+      title: "Project status digest",
       status: "active",
       runnerType: "google_adk",
       runnerConfig: {
         agentPath: "/tmp/agent.py",
-        inputContractKey: "weekly-retro-context",
+        inputContractKey: "project-status-context",
         inputContractVersion: "1",
       },
       pipelineDefinition: { entrypoint: "agent.py", generatedAt: new Date(0).toISOString(), phases: [] },
@@ -437,14 +444,14 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
       triggerDetail: "system",
       status: "succeeded",
       resultJson: {
-        summary: "weekly retro ready",
+        summary: "workflow trigger ready",
         workflowTrigger: {
           companyId,
           sourceHeartbeatRunId: heartbeatRun,
-          contractKey: "weekly-retro-context",
-          contractVersion: "1",
+          contractKey: projectStatusWorkflowTriggerContractDefinition.contractKey,
+          contractVersion: projectStatusWorkflowTriggerContractDefinition.contractVersion,
           generatedAt: "2026-06-24T00:00:00.000Z",
-          payload,
+          payload: buildWorkflowTriggerPayload(),
         },
       },
       createdAt: new Date(),
@@ -455,8 +462,8 @@ describeEmbeddedPostgres("workflowTriggerBridgeService", () => {
     const run = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, heartbeatRun)).then((rows) => rows[0] ?? null);
     expect(run).not.toBeNull();
 
-    await workflowTriggerBridgeService(db).processCompletedHeartbeatRun(run!);
-    await workflowTriggerBridgeService(db).processCompletedHeartbeatRun(run!);
+    await workflowTriggerBridgeService(db, { contractRegistry }).processCompletedHeartbeatRun(run!);
+    await workflowTriggerBridgeService(db, { contractRegistry }).processCompletedHeartbeatRun(run!);
 
     const workflowsTriggered = await db
       .select()

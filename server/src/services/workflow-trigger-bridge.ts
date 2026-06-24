@@ -3,7 +3,9 @@ import type { Db } from "@paperclipai/db";
 import { heartbeatRuns, workflowTriggerArtifacts, workflows } from "@paperclipai/db";
 import {
   validateWorkflowTrigger,
+  workflowTriggerContractRegistry,
   workflowTriggerEnvelopeSchema,
+  type WorkflowTriggerContractRegistry,
   type WorkflowTriggerLineage,
 } from "@paperclipai/shared";
 import { logger } from "../middleware/logger.js";
@@ -140,8 +142,14 @@ async function persistArtifactRow(
     .then((rows) => rows[0] ?? null);
 }
 
-export function workflowTriggerBridgeService(db: Db) {
+export function workflowTriggerBridgeService(
+  db: Db,
+  options: {
+    contractRegistry?: WorkflowTriggerContractRegistry;
+  } = {},
+) {
   const workflowSvc = workflowService(db);
+  const contractRegistry = options.contractRegistry ?? workflowTriggerContractRegistry;
 
   return {
     processCompletedHeartbeatRun: async (run: typeof heartbeatRuns.$inferSelect) => {
@@ -155,6 +163,7 @@ export function workflowTriggerBridgeService(db: Db) {
         workflowTrigger: rawWorkflowTrigger,
         companyId: run.companyId,
         sourceHeartbeatRunId: run.id,
+        contractRegistry,
       });
       const payloadBytes = validation.payloadBytes;
       const payloadHash = validation.payloadHash;

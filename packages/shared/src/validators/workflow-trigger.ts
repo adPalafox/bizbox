@@ -1,23 +1,30 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
-  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY,
-  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION,
-  type WeeklyRetroWorkflowTriggerPayload,
+  WORKFLOW_TRIGGER_CONTEXT_CONTRACT_KEY,
+  WORKFLOW_TRIGGER_CONTEXT_CONTRACT_VERSION,
   type WorkflowTriggerEnvelope,
 } from "../types/workflow-trigger.js";
 
 export {
-  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY,
-  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION,
-  type WeeklyRetroWorkflowTriggerEvidenceReference,
-  type WeeklyRetroWorkflowTriggerPayload,
-  type WeeklyRetroWorkflowTriggerSection,
+  WORKFLOW_TRIGGER_CONTEXT_CONTRACT_KEY,
+  WORKFLOW_TRIGGER_CONTEXT_CONTRACT_VERSION,
+  type WorkflowTriggerEvidenceReference,
+  type WorkflowTriggerPayload,
+  type WorkflowTriggerSection,
   type WorkflowTriggerEnvelope,
   type WorkflowTriggerLineage,
 } from "../types/workflow-trigger.js";
 
 export const WORKFLOW_TRIGGER_PAYLOAD_MAX_BYTES = 128 * 1024;
+
+export interface WorkflowTriggerContractDefinition {
+  contractKey: string;
+  contractVersion: string;
+  payloadSchema: z.ZodTypeAny;
+}
+
+export type WorkflowTriggerContractRegistry = readonly WorkflowTriggerContractDefinition[];
 
 const workflowTriggerEvidenceReferenceSchema = z.object({
   key: z.string().trim().min(1).max(255),
@@ -33,7 +40,7 @@ const workflowTriggerSectionSchema = z.object({
   evidenceRefs: z.array(z.string().trim().min(1).max(255)).default([]),
 }).passthrough();
 
-export const weeklyRetroWorkflowTriggerPayloadSchema = z.object({
+export const workflowTriggerPayloadSchema = z.object({
   generatedAt: z.string().trim().min(1).datetime(),
   evidenceWindow: z.object({
     startAt: z.string().trim().min(1).datetime(),
@@ -44,6 +51,16 @@ export const weeklyRetroWorkflowTriggerPayloadSchema = z.object({
   evidence: z.array(workflowTriggerEvidenceReferenceSchema).default([]),
 }).passthrough();
 
+export const workflowTriggerContractDefinition: WorkflowTriggerContractDefinition = {
+  contractKey: WORKFLOW_TRIGGER_CONTEXT_CONTRACT_KEY,
+  contractVersion: WORKFLOW_TRIGGER_CONTEXT_CONTRACT_VERSION,
+  payloadSchema: workflowTriggerPayloadSchema,
+};
+
+export const workflowTriggerContractRegistry = [
+  workflowTriggerContractDefinition,
+] as const satisfies WorkflowTriggerContractRegistry;
+
 export const workflowTriggerEnvelopeSchema = z.object({
   contractKey: z.string().trim().min(1).max(200),
   contractVersion: z.string().trim().min(1).max(50),
@@ -53,20 +70,40 @@ export const workflowTriggerEnvelopeSchema = z.object({
   payload: z.unknown(),
 }).passthrough();
 
-const workflowTriggerPayloadSchemas = new Map<string, z.ZodTypeAny>([
-  [
-    `${WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY}:${WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION}`,
-    weeklyRetroWorkflowTriggerPayloadSchema,
-  ],
-]);
-
 function stringifyWorkflowTrigger(workflowTrigger: unknown) {
   const json = JSON.stringify(workflowTrigger ?? null);
   return typeof json === "string" ? json : "null";
 }
 
-export function resolveWorkflowTriggerPayloadSchema(contractKey: string, contractVersion: string) {
-  return workflowTriggerPayloadSchemas.get(`${contractKey}:${contractVersion}`) ?? null;
+export function resolveWorkflowTriggerContract(
+  contractKey: string,
+  contractVersion: string,
+  registry: WorkflowTriggerContractRegistry = workflowTriggerContractRegistry,
+) {
+  const contractsForKey = registry.filter((contract) => contract.contractKey === contractKey);
+  if (contractsForKey.length === 0) {
+    return { status: "unknown_contract" as const };
+  }
+  const contract = contractsForKey.find((entry) => entry.contractVersion === contractVersion);
+  if (!contract) {
+    return {
+      status: "contract_version_mismatch" as const,
+      availableVersions: contractsForKey.map((entry) => entry.contractVersion),
+    };
+  }
+  return {
+    status: "found" as const,
+    contract,
+  };
+}
+
+export function resolveWorkflowTriggerPayloadSchema(
+  contractKey: string,
+  contractVersion: string,
+  registry: WorkflowTriggerContractRegistry = workflowTriggerContractRegistry,
+) {
+  const resolution = resolveWorkflowTriggerContract(contractKey, contractVersion, registry);
+  return resolution.status === "found" ? resolution.contract.payloadSchema : null;
 }
 
 export function getWorkflowTriggerPayloadBytes(workflowTrigger: unknown) {
@@ -77,14 +114,15 @@ export type WorkflowTriggerValidationResult =
   | {
       success: true;
       workflowTrigger: WorkflowTriggerEnvelope & {
-        payload: WeeklyRetroWorkflowTriggerPayload;
+        payload: Record<string, unknown>;
       };
+      contract: WorkflowTriggerContractDefinition;
       payloadBytes: number;
       payloadHash: string;
     }
   | {
       success: false;
-      code: "size_limit" | "invalid_envelope" | "invalid_payload" | "company_mismatch" | "source_run_mismatch" | "unknown_contract";
+      code: "size_limit" | "invalid_envelope" | "invalid_payload" | "company_mismatch" | "source_run_mismatch" | "unknown_contract" | "contract_version_mismatch";
       error: string;
       payloadBytes: number;
       payloadHash: string;
@@ -94,8 +132,10 @@ export function validateWorkflowTrigger(input: {
   workflowTrigger: unknown;
   companyId: string;
   sourceHeartbeatRunId: string;
+  contractRegistry?: WorkflowTriggerContractRegistry;
   maxBytes?: number;
 }): WorkflowTriggerValidationResult {
+  const contractRegistry = input.contractRegistry ?? workflowTriggerContractRegistry;
   const payloadBytes = getWorkflowTriggerPayloadBytes(input.workflowTrigger);
   const payloadHash = createHash("sha256").update(stringifyWorkflowTrigger(input.workflowTrigger)).digest("hex");
   const maxBytes = input.maxBytes ?? WORKFLOW_TRIGGER_PAYLOAD_MAX_BYTES;
@@ -140,8 +180,12 @@ export function validateWorkflowTrigger(input: {
     };
   }
 
-  const payloadSchema = resolveWorkflowTriggerPayloadSchema(envelopeResult.data.contractKey, envelopeResult.data.contractVersion);
-  if (!payloadSchema) {
+  const contractResolution = resolveWorkflowTriggerContract(
+    envelopeResult.data.contractKey,
+    envelopeResult.data.contractVersion,
+    contractRegistry,
+  );
+  if (contractResolution.status === "unknown_contract") {
     return {
       success: false,
       code: "unknown_contract",
@@ -150,8 +194,17 @@ export function validateWorkflowTrigger(input: {
       payloadHash,
     };
   }
+  if (contractResolution.status === "contract_version_mismatch") {
+    return {
+      success: false,
+      code: "contract_version_mismatch",
+      error: `Workflow trigger contract "${envelopeResult.data.contractKey}" does not support version "${envelopeResult.data.contractVersion}". Registered versions: ${contractResolution.availableVersions.join(", ")}.`,
+      payloadBytes,
+      payloadHash,
+    };
+  }
 
-  const payloadResult = payloadSchema.safeParse(envelopeResult.data.payload);
+  const payloadResult = contractResolution.contract.payloadSchema.safeParse(envelopeResult.data.payload);
   if (!payloadResult.success) {
     return {
       success: false,
@@ -166,8 +219,9 @@ export function validateWorkflowTrigger(input: {
     success: true,
     workflowTrigger: {
       ...envelopeResult.data,
-      payload: payloadResult.data as WeeklyRetroWorkflowTriggerPayload,
+      payload: payloadResult.data as Record<string, unknown>,
     },
+    contract: contractResolution.contract,
     payloadBytes,
     payloadHash,
   };

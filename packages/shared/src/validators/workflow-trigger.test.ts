@@ -1,9 +1,30 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
-  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY,
-  WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION,
+  workflowTriggerContractDefinition,
   validateWorkflowTrigger,
+  type WorkflowTriggerContractDefinition,
+  type WorkflowTriggerContractRegistry,
 } from "./workflow-trigger.js";
+
+const projectStatusWorkflowTriggerContractDefinition = {
+  contractKey: "project-status-context",
+  contractVersion: "1",
+  payloadSchema: z.object({
+    generatedAt: z.string().trim().min(1).datetime(),
+    projectKey: z.string().trim().min(1).max(200),
+    statusMarkdown: z.string().min(1).max(100_000),
+    notes: z.array(z.object({
+      key: z.string().trim().min(1).max(255),
+      title: z.string().trim().min(1).max(500),
+    }).passthrough()).default([]),
+  }).passthrough(),
+} satisfies WorkflowTriggerContractDefinition;
+
+const contractRegistry: WorkflowTriggerContractRegistry = [
+  workflowTriggerContractDefinition,
+  projectStatusWorkflowTriggerContractDefinition,
+];
 
 function buildTrigger(overrides: Partial<{
   companyId: string;
@@ -15,8 +36,8 @@ function buildTrigger(overrides: Partial<{
   return {
     companyId: overrides.companyId ?? "11111111-1111-4111-8111-111111111111",
     sourceHeartbeatRunId: overrides.sourceHeartbeatRunId ?? "22222222-2222-4222-8222-222222222222",
-    contractKey: overrides.contractKey ?? WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY,
-    contractVersion: overrides.contractVersion ?? WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION,
+    contractKey: overrides.contractKey ?? workflowTriggerContractDefinition.contractKey,
+    contractVersion: overrides.contractVersion ?? workflowTriggerContractDefinition.contractVersion,
     generatedAt: "2026-06-24T00:00:00.000Z",
     payload: overrides.payload ?? {
       generatedAt: "2026-06-24T00:00:00.000Z",
@@ -24,7 +45,7 @@ function buildTrigger(overrides: Partial<{
         startAt: "2026-06-17T00:00:00.000Z",
         endAt: "2026-06-24T00:00:00.000Z",
       },
-      summaryMarkdown: "Weekly retro summary",
+      summaryMarkdown: "Generic summary",
       sections: [
         {
           key: "wins",
@@ -46,22 +67,57 @@ function buildTrigger(overrides: Partial<{
 }
 
 describe("workflow trigger validation", () => {
-  it("accepts a valid weekly retro trigger", () => {
+  it("accepts a valid contract payload", () => {
     const result = validateWorkflowTrigger({
       workflowTrigger: buildTrigger(),
       companyId: "11111111-1111-4111-8111-111111111111",
       sourceHeartbeatRunId: "22222222-2222-4222-8222-222222222222",
+      contractRegistry,
     });
 
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    expect(result.workflowTrigger.contractKey).toBe(WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_KEY);
-    expect(result.workflowTrigger.contractVersion).toBe(WORKFLOW_TRIGGER_WEEKLY_RETRO_CONTEXT_CONTRACT_VERSION);
-    expect(result.workflowTrigger.payload.summaryMarkdown).toBe("Weekly retro summary");
+    expect(result.workflowTrigger.contractKey).toBe(workflowTriggerContractDefinition.contractKey);
+    expect(result.workflowTrigger.contractVersion).toBe(workflowTriggerContractDefinition.contractVersion);
+    expect(result.workflowTrigger.payload).toMatchObject({
+      summaryMarkdown: "Generic summary",
+    });
   });
 
-  it("rejects an invalid weekly retro payload", () => {
+  it("accepts a second contract payload", () => {
+    const result = validateWorkflowTrigger({
+      workflowTrigger: buildTrigger({
+        contractKey: projectStatusWorkflowTriggerContractDefinition.contractKey,
+        contractVersion: projectStatusWorkflowTriggerContractDefinition.contractVersion,
+        payload: {
+          generatedAt: "2026-06-24T00:00:00.000Z",
+          projectKey: "project-alpha",
+          statusMarkdown: "Project is green.",
+          notes: [
+            {
+              key: "note-1",
+              title: "Reconciled inputs",
+            },
+          ],
+        },
+      }),
+      companyId: "11111111-1111-4111-8111-111111111111",
+      sourceHeartbeatRunId: "22222222-2222-4222-8222-222222222222",
+      contractRegistry,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.workflowTrigger.contractKey).toBe("project-status-context");
+    expect(result.workflowTrigger.payload).toMatchObject({
+      projectKey: "project-alpha",
+      statusMarkdown: "Project is green.",
+    });
+  });
+
+  it("rejects an invalid contract payload", () => {
     const result = validateWorkflowTrigger({
       workflowTrigger: buildTrigger({
         payload: {
@@ -74,6 +130,7 @@ describe("workflow trigger validation", () => {
       }),
       companyId: "11111111-1111-4111-8111-111111111111",
       sourceHeartbeatRunId: "22222222-2222-4222-8222-222222222222",
+      contractRegistry,
     });
 
     expect(result.success).toBe(false);
@@ -86,6 +143,20 @@ describe("workflow trigger validation", () => {
       workflowTrigger: buildTrigger({ contractVersion: "2" }),
       companyId: "11111111-1111-4111-8111-111111111111",
       sourceHeartbeatRunId: "22222222-2222-4222-8222-222222222222",
+      contractRegistry,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.code).toBe("contract_version_mismatch");
+  });
+
+  it("rejects an unknown contract key", () => {
+    const result = validateWorkflowTrigger({
+      workflowTrigger: buildTrigger({ contractKey: "unknown-context", contractVersion: "1" }),
+      companyId: "11111111-1111-4111-8111-111111111111",
+      sourceHeartbeatRunId: "22222222-2222-4222-8222-222222222222",
+      contractRegistry,
     });
 
     expect(result.success).toBe(false);
@@ -98,6 +169,7 @@ describe("workflow trigger validation", () => {
       workflowTrigger: buildTrigger({ companyId: "33333333-3333-4333-8333-333333333333" }),
       companyId: "11111111-1111-4111-8111-111111111111",
       sourceHeartbeatRunId: "22222222-2222-4222-8222-222222222222",
+      contractRegistry,
     });
 
     expect(result.success).toBe(false);
@@ -110,6 +182,7 @@ describe("workflow trigger validation", () => {
       workflowTrigger: buildTrigger(),
       companyId: "11111111-1111-4111-8111-111111111111",
       sourceHeartbeatRunId: "22222222-2222-4222-8222-222222222222",
+      contractRegistry,
       maxBytes: 10,
     });
 
