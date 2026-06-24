@@ -134,10 +134,13 @@ For `clickup_agent_ref`:
 For `awaiting_human` ClickUp notifications:
 
 - Configure the approval surface with `CLICKUP_AWAITING_HUMAN_CHANNEL_ID` or `CLICKUP_AWAITING_HUMAN_CHANNEL_NAME`.
+- Configure the attachment sink task with company awaiting-human `attachmentTaskId`. When a `request_confirmation` approval has a human review output, Bizbox validates that the output is a reviewable document/text file, uploads it to that ClickUp task, and links the returned attachment URL in the chat handoff. Confirmations without review outputs can still be sent without an attachment.
 - Bizbox still falls back to `CLICKUP_ENGINEERING_CHANNEL_ID` / `CLICKUP_ENGINEERING_CHANNEL_NAME` when the new vars are unset.
 - If neither name variable is set, Bizbox now defaults the lookup target to `bizbox-feed`.
 - Inbound approval polling still follows the tracked ClickUp message id, so renaming the approval channel does not change reconciliation behavior.
-- Positive replies/reactions accept the pending confirmation. Non-approval replies reject the confirmation and are forwarded into the issue as comments. Explicit negative reactions such as `thumbsdown` reject without forwarding comment text.
+- Positive replies/reactions accept the pending confirmation. Non-approval replies reject the confirmation and are forwarded into the issue as comments. Explicit negative reactions such as `thumbsdown` reject without forwarding comment text. Terminal main-message reactions are acknowledgement-oriented: `white_check_mark` for approved/rejected/superseded, `x` for failed retry/failed bridge cleanup.
+- For generic approval handoffs, set `primaryReviewerUserId` and `secondaryReviewerUserId` in the ClickUp awaiting-human provider config or via `CLICKUP_AWAITING_HUMAN_PRIMARY_REVIEWER_USER_ID` / `CLICKUP_AWAITING_HUMAN_SECONDARY_REVIEWER_USER_ID`. Bizbox renders those as ClickUp mention chips in the outbound approval message when the handoff includes approval context, and falls back to the primary reviewer for single-step approvals when the secondary reviewer is unset.
+- When both reviewers are configured, accepting the primary review creates a new final-review interaction and ClickUp handoff for the secondary reviewer. The issue remains `awaiting_human`, and the assignee is not woken until the final review is accepted.
 
 A review-driven regression briefly treated `clickupAgentUserId` as a hard inbound author gate and caused stuck live ClickUp polls. Keep the fields separate.
 

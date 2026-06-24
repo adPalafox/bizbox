@@ -1,4 +1,12 @@
 export type { Company } from "./company.js";
+export type {
+  AwaitingHumanProvider,
+  ClickUpAwaitingHumanProviderConfig,
+  ClickUpAwaitingHumanConnectionTestResult,
+  AwaitingHumanProviderConfig,
+  CompanyAwaitingHumanSettings,
+  UpdateCompanyAwaitingHumanSettingsRequest,
+} from "./awaiting-human-settings.js";
 export type { Environment, EnvironmentLease, LocalEnvironmentConfig } from "./environment.js";
 export type {
   FeedbackVote,
@@ -119,7 +127,22 @@ export type {
   DeliverableIssueRef,
   DeliverableListItem,
   DeliverablePreview,
+  DeliverableWorkflowRef,
 } from "./deliverable.js";
+export type {
+  Workflow,
+  WorkflowPipelineDefinition,
+  WorkflowPipelinePhase,
+  WorkflowRunUsage,
+  WorkflowRunConsoleChunk,
+  WorkflowRun,
+  WorkflowPhase,
+  WorkflowHandoff,
+  WorkflowDeliverableSummary,
+  WorkflowRunDetail,
+  WorkflowListItem,
+  WorkflowDetail,
+} from "./workflow.js";
 export type {
   Issue,
   IssueAssigneeAdapterOverrides,
@@ -137,6 +160,11 @@ export type {
   IssueComment,
   PendingHumanInboxInteraction,
   PendingHumanInboxInteractionIssue,
+  AwaitingHumanBridgeStatus,
+  AwaitingHumanBridgeCloseOutcome,
+  InteractionAwaitingHumanHandoffPhase,
+  InteractionAwaitingHumanHandoffStatus,
+  IssueInteractionHandoffStatusResponse,
   IssueThreadInteractionActorFields,
   SuggestedTaskDraft,
   SuggestTasksPayload,
@@ -270,6 +298,7 @@ export type {
   CompanyPortabilityIssueRoutineTriggerManifestEntry,
   CompanyPortabilityIssueRoutineManifestEntry,
   CompanyPortabilityIssueManifestEntry,
+  CompanyPortabilityWorkflowManifestEntry,
   CompanyPortabilityManifest,
   CompanyPortabilityExportResult,
   CompanyPortabilityExportPreviewFile,
@@ -282,6 +311,7 @@ export type {
   CompanyPortabilityPreviewAgentPlan,
   CompanyPortabilityPreviewProjectPlan,
   CompanyPortabilityPreviewIssuePlan,
+  CompanyPortabilityPreviewWorkflowPlan,
   CompanyPortabilityPreviewResult,
   CompanyPortabilityAdapterOverride,
   CompanyPortabilityImportRequest,

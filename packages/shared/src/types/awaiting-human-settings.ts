@@ -1,0 +1,36 @@
+export type AwaitingHumanProvider = "clickup";
+
+export interface ClickUpAwaitingHumanProviderConfig {
+  workspaceId: string | null;
+  channelId: string | null;
+  attachmentTaskId: string | null;
+  primaryReviewerUserId: string | null;
+  secondaryReviewerUserId: string | null;
+}
+
+export type AwaitingHumanProviderConfig = ClickUpAwaitingHumanProviderConfig;
+
+export interface CompanyAwaitingHumanSettings {
+  companyId: string;
+  enabled: boolean;
+  provider: AwaitingHumanProvider | null;
+  providerConfig: AwaitingHumanProviderConfig | null;
+  hasStoredAuthToken: boolean;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+}
+
+export interface UpdateCompanyAwaitingHumanSettingsRequest {
+  enabled?: boolean;
+  provider?: AwaitingHumanProvider | null;
+  providerConfig?: AwaitingHumanProviderConfig | null;
+  clickupPersonalToken?: string | null;
+  connectionTestMode?: "channel" | "reviewers";
+}
+
+export interface ClickUpAwaitingHumanConnectionTestResult {
+  channel: "clickup-chat";
+  status: "sent" | "skipped" | "failed";
+  detail: string;
+  externalId?: string | null;
+}

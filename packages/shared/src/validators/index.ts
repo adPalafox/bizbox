@@ -25,6 +25,14 @@ export {
   type UpdateCompanyBranding,
 } from "./company.js";
 export {
+  awaitingHumanProviderSchema,
+  clickupAwaitingHumanProviderConfigSchema,
+  companyAwaitingHumanSettingsSchema,
+  patchCompanyAwaitingHumanSettingsSchema,
+  type CompanyAwaitingHumanSettings,
+  type PatchCompanyAwaitingHumanSettings,
+} from "./awaiting-human-settings.js";
+export {
   environmentDriverSchema,
   environmentStatusSchema,
   environmentLeaseStatusSchema,
@@ -244,6 +252,34 @@ export {
   type CreateGoal,
   type UpdateGoal,
 } from "./goal.js";
+export {
+  workflowPromptTemplateSchema,
+  workflowRunnerConfigSchema,
+  workflowRunnerTypeSchema,
+  workflowStatusSchema,
+  workflowRunStatusSchema,
+  workflowPhaseStatusSchema,
+  workflowHandoffKindSchema,
+  workflowHandoffStatusSchema,
+  workflowPipelinePhaseSchema,
+  workflowPipelineDefinitionSchema,
+  createWorkflowSchema,
+  updateWorkflowSchema,
+  runWorkflowSchema,
+  workflowCallbackAuthSchema,
+  workflowPhaseEventSchema,
+  createWorkflowHandoffSchema,
+  resolveWorkflowHandoffSchema,
+  createWorkflowDeliverableSchema,
+  type CreateWorkflow,
+  type UpdateWorkflow,
+  type RunWorkflow,
+  type WorkflowPhaseEvent,
+  type CreateWorkflowHandoff,
+  type ResolveWorkflowHandoff,
+  type CreateWorkflowDeliverable,
+  type WorkflowPromptTemplate,
+} from "./workflow.js";
 
 export {
   createApprovalSchema,

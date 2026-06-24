@@ -102,13 +102,15 @@ translates it into acceptance of the matching pending
 `request_confirmation` interaction, then resumes work through the normal
 interaction-resolution wake path.
 
-If an `awaiting_human` handoff has a human-facing deliverable, Bizbox
-queues the ClickUp notification in an outbox. The worker creates/reuses a
-ClickUp review task, uploads the deliverable to that task when
-`CLICKUP_AWAITING_HUMAN_REVIEW_LIST_ID` is configured, and posts the chat
-handoff with both the Bizbox deliverable link and ClickUp review task link.
-ClickUp Chat is not treated as a durable file host because its public API
-does not provide a documented chat-message attachment upload field.
+If a `request_confirmation` handoff has a human review output, Bizbox
+queues the ClickUp notification in an outbox. The worker resolves the
+review output, validates that it is a reviewable document/text file,
+uploads it to the company-configured ClickUp attachment sink task
+(`attachmentTaskId`), then posts the chat handoff with the ClickUp
+attachment URL. Confirmations without review outputs can still be sent
+without an attachment. ClickUp Chat is not treated as a durable file host
+because its public API does not provide a documented chat-message
+attachment upload field.
 
 ### `in_review`
 

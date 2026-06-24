@@ -9,6 +9,8 @@ import {
   enqueueAwaitingHumanNotification,
   type AwaitingHumanNotificationPayload,
 } from "./awaiting-human-notifications.js";
+import type { ApprovalFlowContext } from "./approval-flow-routing.js";
+import { awaitingHumanSettingsService } from "./awaiting-human-settings.js";
 import { logActivity } from "./activity-log.js";
 import { logger } from "../middleware/logger.js";
 
@@ -38,7 +40,7 @@ type AwaitingHumanBlocker = {
   assigneeUserId?: string | null;
 };
 
-type AwaitingHumanInteraction =
+export type AwaitingHumanInteraction =
   | Pick<RequestConfirmationInteraction, "id" | "kind" | "title" | "summary" | "payload">
   | Pick<AskUserQuestionsInteraction, "id" | "kind" | "title" | "summary" | "payload">;
 
@@ -50,7 +52,9 @@ type AwaitingHumanHandoffInput = {
   actor: AwaitingHumanActor;
   interaction?: AwaitingHumanInteraction | null;
   blockers?: AwaitingHumanBlocker[] | null;
+  approvalContext?: ApprovalFlowContext | null;
   emitIssueUpdatedActivity?: boolean;
+  delivery?: "enqueue" | "none";
 };
 
 function truncateText(value: string, maxLength: number) {
@@ -71,6 +75,125 @@ function firstNonEmpty(...values: Array<string | null | undefined>) {
 function summarizeQuestions(interaction: AwaitingHumanInteraction | null | undefined) {
   if (!interaction || interaction.kind !== "ask_user_questions") return null;
   return `Need answers to ${interaction.payload.questions.length} question(s).`;
+}
+
+export function renderAskUserQuestionsBody(
+  interaction: AwaitingHumanInteraction | null | undefined,
+  link = "",
+) {
+  if (!interaction || interaction.kind !== "ask_user_questions") return null;
+  const lines: string[] = [];
+  if (interaction.payload.title?.trim()) {
+    lines.push(interaction.payload.title.trim());
+    lines.push("");
+  }
+  interaction.payload.questions.forEach((question, index) => {
+    lines.push(`Question ${index + 1}: ${question.prompt}`);
+    if (question.helpText?.trim()) {
+      lines.push(`Help: ${question.helpText.trim()}`);
+    }
+    lines.push(`Required: ${question.required ? "Yes" : "No"}`);
+    lines.push(`Pick: ${question.selectionMode === "single" ? "One" : "One or more"}`);
+    if (question.options.length > 0) {
+      lines.push("Options:");
+      for (const option of question.options) {
+        lines.push(`- ${option.label}${option.description?.trim() ? ` — ${option.description.trim()}` : ""}`);
+      }
+    }
+    if (index < interaction.payload.questions.length - 1) {
+      lines.push("");
+    }
+  });
+  const body = lines.join("\n").trim();
+  if (!link.trim()) return body || null;
+  return body ? `${body}\n\nOpen in Bizbox: ${link.trim()}` : `Open in Bizbox: ${link.trim()}`;
+}
+
+export const REQUEST_CONFIRMATION_REPLY_INSTRUCTIONS = [
+  "Reply with:",
+  "  `Approve`",
+  "  `Reject`",
+  "  `Change` followed by feedback",
+].join("\n");
+
+function normalizeConfirmationReplyText(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function classifyRequestConfirmationReply(
+  replyBody: string,
+): "approve" | "reject" | null {
+  const normalizedReply = normalizeConfirmationReplyText(replyBody);
+  if (!normalizedReply) return null;
+
+  if (normalizedReply === "approve") return "approve";
+  if (normalizedReply === "reject") return "reject";
+  if (normalizedReply === "change" || normalizedReply.startsWith("change ")) {
+    return "reject";
+  }
+
+  return null;
+}
+
+function resolveRenderedTargetLink(targetHref: string, link: string) {
+  const trimmedTargetHref = targetHref.trim();
+  if (!trimmedTargetHref) return null;
+  try {
+    return new URL(trimmedTargetHref).toString();
+  } catch {
+    // continue
+  }
+  if (link.trim()) {
+    try {
+      return new URL(trimmedTargetHref, link.trim()).toString();
+    } catch {
+      // continue
+    }
+  }
+  const baseUrl = resolveBaseUrl();
+  if (baseUrl) {
+    try {
+      return new URL(trimmedTargetHref, `${baseUrl}/`).toString();
+    } catch {
+      // continue
+    }
+  }
+  return trimmedTargetHref;
+}
+
+export function renderRequestConfirmationBody(
+  interaction: AwaitingHumanInteraction | null | undefined,
+  link = "",
+) {
+  if (!interaction || interaction.kind !== "request_confirmation") return null;
+  const lines: string[] = [];
+  if (interaction.payload.prompt?.trim()) {
+    lines.push(interaction.payload.prompt.trim());
+  }
+  if (interaction.payload.detailsMarkdown?.trim()) {
+    if (lines.length > 0) lines.push("");
+    lines.push(interaction.payload.detailsMarkdown.trim());
+  }
+  if (lines.length > 0) lines.push("");
+  lines.push(REQUEST_CONFIRMATION_REPLY_INSTRUCTIONS);
+  if (interaction.payload.target?.label?.trim() || interaction.payload.target?.href?.trim()) {
+    if (lines.length > 0) lines.push("");
+    if (interaction.payload.target.label?.trim()) {
+      lines.push(`Target: ${interaction.payload.target.label.trim()}`);
+    }
+    if (interaction.payload.target.href?.trim()) {
+      const renderedTargetLink = resolveRenderedTargetLink(interaction.payload.target.href, link);
+      if (renderedTargetLink) {
+        lines.push(`Target link: ${renderedTargetLink}`);
+      }
+    }
+  }
+  if (lines.length > 0) lines.push("");
+  lines.push("Disclaimer:");
+  lines.push("It is your responsibility to read and verify this content. Not doing so may result in unattended negative consequence leading to financial loss or brand harm");
+  const body = lines.join("\n").trim();
+  if (!link.trim()) return body || null;
+  return body ? `${body}\n\nOpen in Bizbox: ${link.trim()}` : `Open in Bizbox: ${link.trim()}`;
 }
 
 function summarizeBlockers(blockers: AwaitingHumanBlocker[] | null | undefined) {
@@ -154,22 +277,91 @@ function resolveAudienceUserId(input: AwaitingHumanHandoffInput) {
   return userIds.length === 1 ? userIds[0] : null;
 }
 
-function buildNotification(
+async function resolveApprovalContext(
+  db: Db,
   input: AwaitingHumanHandoffInput,
+): Promise<ApprovalFlowContext | null> {
+  if (input.approvalContext) {
+    return {
+      approvalName: input.approvalContext.approvalName ?? null,
+      approvalStage: input.approvalContext.approvalStage ?? null,
+      requiresSecondReview: input.approvalContext.requiresSecondReview ?? null,
+    };
+  }
+  if (input.handoffKind !== "request_confirmation") return null;
+
+  try {
+    const runtime = await awaitingHumanSettingsService(db).resolveClickUpRuntimeConfig(
+      input.updatedIssue.companyId,
+    );
+    const primaryReviewerUserId = runtime.primaryReviewerUserId?.trim() ?? "";
+    const secondaryReviewerUserId = runtime.secondaryReviewerUserId?.trim() ?? "";
+    if (!primaryReviewerUserId && !secondaryReviewerUserId) return null;
+
+    const policy = input.interaction?.kind === "request_confirmation"
+      ? (input.interaction.payload.approvalPolicy ?? "full")
+      : "full";
+
+    return {
+      approvalName: null,
+      approvalStage: null,
+      requiresSecondReview: policy !== "primary_only" && Boolean(secondaryReviewerUserId),
+    };
+  } catch (err) {
+    if (err instanceof Error && err.message === "awaiting-human-bridge-disabled") {
+      return null;
+    }
+    logger.warn(
+      {
+        err,
+        companyId: input.updatedIssue.companyId,
+        issueId: input.updatedIssue.id,
+      },
+      "failed to resolve ClickUp approval context",
+    );
+    return null;
+  }
+}
+
+async function buildNotification(
+  input: AwaitingHumanHandoffInput,
+  approvalContext: ApprovalFlowContext | null,
   link: string,
   needsHumanInput: string,
   audienceUserId: string | null,
-): AwaitingHumanNotificationPayload {
+): Promise<AwaitingHumanNotificationPayload> {
   const label = input.updatedIssue.identifier ?? truncateText(input.updatedIssue.title, 48);
+  const isQuestionHandoff = input.handoffKind === "ask_user_questions";
   return {
-    title: truncateText(`${label} is waiting on human input`, 120),
+    title: truncateText(
+      isQuestionHandoff
+        ? `${label} needs answers`
+        : input.handoffKind === "request_confirmation"
+          ? `${label} needs confirmation`
+          : `${label} is waiting on human input`,
+      120,
+    ),
     summary: truncateText(needsHumanInput, 280),
     link,
-    cta: `Open ${label} in Bizbox and respond there.`,
+    cta: isQuestionHandoff
+      ? "Reply with answers to the questions below."
+      : "Reply with Approve, Reject, or Change followed by feedback.",
     labels: ["awaiting_human", input.handoffKind],
     kind: input.handoffKind,
+    interactionId: input.interaction?.id ?? null,
     audience: audienceUserId,
-    body: null,
+    body: isQuestionHandoff
+      ? renderAskUserQuestionsBody(input.interaction, link)
+      : input.handoffKind === "request_confirmation"
+        ? renderRequestConfirmationBody(input.interaction, link)
+        : null,
+    approvalContext,
+    target: input.handoffKind === "request_confirmation" && input.interaction?.kind === "request_confirmation"
+      ? {
+        label: input.interaction.payload.target?.label ?? null,
+        href: input.interaction.payload.target?.href ?? null,
+      }
+      : null,
   };
 }
 
@@ -221,7 +413,14 @@ export async function maybeLogAwaitingHumanHandoff(
   if (await hasLoggedAwaitingHumanHandoff(db, input, dedupeKey)) return false;
   const audienceUserId = resolveAudienceUserId(input);
   const notificationLink = issueUrl ?? issuePath;
-  const notification = buildNotification(input, notificationLink, needsHumanInput, audienceUserId);
+  const approvalContext = await resolveApprovalContext(db, input);
+  const notification = await buildNotification(
+    input,
+    approvalContext,
+    notificationLink,
+    needsHumanInput,
+    audienceUserId,
+  );
   const firstBlocker = input.blockers?.[0] ?? null;
 
   if (input.emitIssueUpdatedActivity) {
@@ -254,15 +453,26 @@ export async function maybeLogAwaitingHumanHandoff(
     });
   }
 
-  const delivery = await enqueueAwaitingHumanNotification(db, {
-    companyId: input.updatedIssue.companyId,
-    issueId: input.updatedIssue.id,
-    dedupeKey,
-    handoffKind: input.handoffKind,
-    notification,
-  });
+  const delivery = input.delivery === "none"
+    ? {
+      status: "skipped",
+      channel: "audit-only",
+      detail: "audit-only",
+      externalId: null,
+    }
+    : await enqueueAwaitingHumanNotification(db, {
+      companyId: input.updatedIssue.companyId,
+      issueId: input.updatedIssue.id,
+      dedupeKey,
+      handoffKind: input.handoffKind,
+      notification,
+    });
 
-  if (delivery.status !== "sent" && delivery.status !== "enqueued") {
+  if (
+    input.delivery !== "none"
+    && delivery.status !== "sent"
+    && delivery.status !== "enqueued"
+  ) {
     logger.warn(
       {
         companyId: input.updatedIssue.companyId,
@@ -302,7 +512,8 @@ export async function maybeLogAwaitingHumanHandoff(
       interactionKind: input.interaction?.kind ?? null,
       blockerIssueId: firstBlocker?.id ?? null,
       blockerIdentifier: firstBlocker?.identifier ?? null,
-      dedupeKey: delivery.status === "sent" || delivery.status === "enqueued" ? dedupeKey : null,
+      approvalContext,
+      dedupeKey,
       notification,
       notificationDelivery: {
         status: delivery.status,
@@ -313,5 +524,5 @@ export async function maybeLogAwaitingHumanHandoff(
     },
   });
 
-  return delivery.status === "sent" || delivery.status === "enqueued";
+  return delivery.status === "sent" || delivery.status === "enqueued" || input.delivery === "none";
 }

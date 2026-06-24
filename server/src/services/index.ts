@@ -30,9 +30,20 @@ export { approvalService } from "./approvals.js";
 export { budgetService } from "./budgets.js";
 export { secretService } from "./secrets.js";
 export { routineService } from "./routines.js";
+export { workflowService } from "./workflows.js";
+export { workflowHandoffBridgeService } from "./workflow-handoff-bridge.js";
 export { costService } from "./costs.js";
 export { financeService } from "./finance.js";
 export { heartbeatService } from "./heartbeat.js";
+export { awaitingHumanSettingsService } from "./awaiting-human-settings.js";
+export { awaitingHumanBridgeService, type AwaitingHumanBridgeAdapter, type AwaitingHumanBridgePollEvent } from "./awaiting-human-bridge.js";
+export { awaitingHumanBridgeRuntime } from "./awaiting-human-bridge-runtime.js";
+export {
+  hasAnyAwaitingHumanBridgeAdapter,
+  hasAwaitingHumanBridgeAdapter,
+  registerAwaitingHumanBridgeAdapter,
+  resolveAwaitingHumanBridgeAdapter,
+} from "./awaiting-human-bridge-registry.js";
 export { clickupBridgeService } from "./clickup-bridge.js";
 export { classifyIssueGraphLiveness, type IssueLivenessFinding } from "./issue-liveness.js";
 export { dashboardService } from "./dashboard.js";

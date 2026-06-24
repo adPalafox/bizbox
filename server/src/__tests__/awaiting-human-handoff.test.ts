@@ -1,9 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@paperclipai/db";
 
+const mockResolveClickUpRuntimeConfig = vi.hoisted(() => vi.fn().mockResolvedValue({
+  enabled: true,
+  provider: "clickup",
+  personalToken: "token-123",
+  workspaceId: "workspace-1",
+  channelId: "channel-1",
+  attachmentTaskId: null,
+  primaryReviewerUserId: null,
+  secondaryReviewerUserId: null,
+}));
+
 vi.mock("../services/activity-log.js", () => ({
   logActivity: vi.fn().mockResolvedValue(undefined),
 }));
+
+const mockLoggerWarn = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/awaiting-human-notifications.js", () => ({
   enqueueAwaitingHumanNotification: vi.fn().mockResolvedValue({
@@ -11,6 +24,18 @@ vi.mock("../services/awaiting-human-notifications.js", () => ({
     channel: "clickup-chat",
     detail: "enqueued",
   }),
+}));
+
+vi.mock("../middleware/logger.js", () => ({
+  logger: {
+    warn: mockLoggerWarn,
+  },
+}));
+
+vi.mock("../services/awaiting-human-settings.js", () => ({
+  awaitingHumanSettingsService: vi.fn(() => ({
+    resolveClickUpRuntimeConfig: mockResolveClickUpRuntimeConfig,
+  })),
 }));
 
 const { logActivity } = await import("../services/activity-log.js");
@@ -92,12 +117,222 @@ describe("maybeLogAwaitingHumanHandoff", () => {
         dedupeKey: "interaction:interaction-1",
         handoffKind: "request_confirmation",
         notification: expect.objectContaining({
+          title: "BIZ-35 needs confirmation",
           link: "https://bizbox.example/issues/BIZ-35",
           summary: "Approve the exact GitHub reply before posting.",
+          cta: "Reply with Approve, Reject, or Change followed by feedback.",
+          body: expect.stringMatching(/Reply with:[\s\S]*`Change` followed by feedback[\s\S]*Disclaimer:[\s\S]*Open in Bizbox: https:\/\/bizbox\.example\/issues\/BIZ-35/),
         }),
       }),
     );
     expect(logActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes approval context through the handoff payload", async () => {
+    process.env.BIZBOX_PUBLIC_URL = "https://bizbox.example";
+
+    const created = await maybeLogAwaitingHumanHandoff(mockDbWithAwaitingHumanRows(), {
+      previousIssue: basePreviousIssue,
+      updatedIssue: baseUpdatedIssue,
+      source: "issue_thread_interactions.create",
+      handoffKind: "request_confirmation",
+      actor: baseActor,
+      approvalContext: {
+        approvalName: "Policy approval",
+        requiresSecondReview: true,
+      },
+      interaction: {
+        id: "interaction-ugc-1",
+        kind: "request_confirmation",
+        title: null,
+        summary: null,
+        payload: {
+          version: 1,
+          prompt: "Approve the finance article before it goes to the final reviewer.",
+        },
+      },
+    });
+
+    expect(created).toBe(true);
+    expect(enqueueAwaitingHumanNotification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        notification: expect.objectContaining({
+          approvalContext: {
+            approvalName: "Policy approval",
+            approvalStage: null,
+            requiresSecondReview: true,
+          },
+        }),
+      }),
+    );
+    expect(logActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({
+          approvalContext: {
+            approvalName: "Policy approval",
+            approvalStage: null,
+            requiresSecondReview: true,
+          },
+        }),
+      }),
+    );
+  });
+
+  it("warns when ClickUp approval context lookup fails", async () => {
+    process.env.BIZBOX_PUBLIC_URL = "https://bizbox.example";
+    mockResolveClickUpRuntimeConfig.mockRejectedValueOnce(new Error("lookup failed"));
+
+    const created = await maybeLogAwaitingHumanHandoff(mockDbWithAwaitingHumanRows(), {
+      previousIssue: basePreviousIssue,
+      updatedIssue: baseUpdatedIssue,
+      source: "issue_thread_interactions.create",
+      handoffKind: "request_confirmation",
+      actor: baseActor,
+      interaction: {
+        id: "interaction-review-2",
+        kind: "request_confirmation",
+        title: null,
+        summary: null,
+        payload: {
+          version: 1,
+          prompt: "Approve the finance article before it goes to the final reviewer.",
+        },
+      },
+    });
+
+    expect(created).toBe(true);
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: expect.any(Error),
+        companyId: "company-1",
+        issueId: "issue-1",
+      }),
+      "failed to resolve ClickUp approval context",
+    );
+  });
+
+  it("silently skips approval context resolution when ClickUp is disabled", async () => {
+    process.env.BIZBOX_PUBLIC_URL = "https://bizbox.example";
+    mockResolveClickUpRuntimeConfig.mockRejectedValueOnce(new Error("awaiting-human-bridge-disabled"));
+
+    const created = await maybeLogAwaitingHumanHandoff(mockDbWithAwaitingHumanRows(), {
+      previousIssue: basePreviousIssue,
+      updatedIssue: baseUpdatedIssue,
+      source: "issue_thread_interactions.create",
+      handoffKind: "request_confirmation",
+      actor: baseActor,
+      interaction: {
+        id: "interaction-review-3",
+        kind: "request_confirmation",
+        title: null,
+        summary: null,
+        payload: {
+          version: 1,
+          prompt: "Approve the finance article before it goes to the final reviewer.",
+        },
+      },
+    });
+
+    expect(created).toBe(true);
+    expect(mockLoggerWarn).not.toHaveBeenCalled();
+  });
+
+  it("infers ClickUp reviewer routing for request_confirmation handoffs when reviewer IDs are configured", async () => {
+    process.env.BIZBOX_PUBLIC_URL = "https://bizbox.example";
+    mockResolveClickUpRuntimeConfig.mockResolvedValueOnce({
+      enabled: true,
+      provider: "clickup",
+      personalToken: "token-123",
+      workspaceId: "workspace-1",
+      channelId: "channel-1",
+      attachmentTaskId: null,
+      primaryReviewerUserId: "primary-user-id",
+      secondaryReviewerUserId: "secondary-user-id",
+    });
+
+    const created = await maybeLogAwaitingHumanHandoff(mockDbWithAwaitingHumanRows(), {
+      previousIssue: basePreviousIssue,
+      updatedIssue: baseUpdatedIssue,
+      source: "issue_thread_interactions.create",
+      handoffKind: "request_confirmation",
+      actor: baseActor,
+      interaction: {
+        id: "interaction-review-1",
+        kind: "request_confirmation",
+        title: null,
+        summary: null,
+        payload: {
+          version: 1,
+          prompt: "Approve the finance article before it goes to the final reviewer.",
+        },
+      },
+    });
+
+    expect(created).toBe(true);
+    expect(enqueueAwaitingHumanNotification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        notification: expect.objectContaining({
+          approvalContext: {
+            approvalName: null,
+            approvalStage: null,
+            requiresSecondReview: true,
+          },
+        }),
+      }),
+    );
+    expect(logActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({
+          approvalContext: {
+            approvalName: null,
+            approvalStage: null,
+            requiresSecondReview: true,
+          },
+        }),
+      }),
+    );
+  });
+
+  it("renders absolute target links for relative request confirmation targets", async () => {
+    process.env.BIZBOX_PUBLIC_URL = "https://bizbox.example";
+
+    const created = await maybeLogAwaitingHumanHandoff(mockDbWithAwaitingHumanRows(), {
+      previousIssue: basePreviousIssue,
+      updatedIssue: baseUpdatedIssue,
+      source: "issue_thread_interactions.create",
+      handoffKind: "request_confirmation",
+      actor: baseActor,
+      interaction: {
+        id: "interaction-1b",
+        kind: "request_confirmation",
+        title: null,
+        summary: null,
+        payload: {
+          version: 1,
+          prompt: "Do you approve attached growth image for use?",
+          target: {
+            type: "custom",
+            key: "growth-image-attachment",
+            label: "Growth image attachment",
+            href: "/api/attachments/347bbaac-d44e-4c4e-9d76-63a2b9e495a8/content",
+          },
+        },
+      },
+    });
+
+    expect(created).toBe(true);
+    expect(enqueueAwaitingHumanNotification).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        notification: expect.objectContaining({
+          body: expect.stringContaining("Target link: https://bizbox.example/api/attachments/347bbaac-d44e-4c4e-9d76-63a2b9e495a8/content"),
+        }),
+      }),
+    );
   });
 
   it("sends a ClickUp notification for ask_user_questions handoffs", async () => {
@@ -128,8 +363,10 @@ describe("maybeLogAwaitingHumanHandoff", () => {
       expect.objectContaining({
         handoffKind: "ask_user_questions",
         notification: expect.objectContaining({
+          title: "BIZ-35 needs answers",
           summary: "Need answers to 2 question(s).",
           link: "/issues/BIZ-35",
+          body: expect.stringMatching(/Question 1: Which scope\?[\s\S]*Open in Bizbox: \/issues\/BIZ-35/),
         }),
       }),
     );

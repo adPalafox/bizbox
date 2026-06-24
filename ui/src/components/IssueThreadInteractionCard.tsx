@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Agent } from "@paperclipai/shared";
+import type { Agent, InteractionAwaitingHumanHandoffStatus } from "@paperclipai/shared";
 import { AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, GitBranch, ListChecks, Loader2, MessageSquareQuote, XCircle } from "lucide-react";
 import { Link } from "@/lib/router";
 import { formatAssigneeUserLabel } from "../lib/assignees";
@@ -18,7 +18,12 @@ import {
   type SuggestedTaskDraft,
   type SuggestedTaskTreeNode,
 } from "../lib/issue-thread-interactions";
+import {
+  resolveDisplayHandoffStatus,
+  shouldShowInteractionHandoffStatus,
+} from "../lib/interaction-handoff-status";
 import { cn, formatDateTime, formatShortDate } from "../lib/utils";
+import { InteractionHandoffStatus } from "./InteractionHandoffStatus";
 import { MarkdownBody } from "./MarkdownBody";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
@@ -43,6 +48,7 @@ interface IssueThreadInteractionCardProps {
     interaction: AskUserQuestionsInteraction,
     answers: AskUserQuestionsAnswer[],
   ) => Promise<void> | void;
+  handoffStatus?: InteractionAwaitingHumanHandoffStatus | null;
 }
 
 function resolveActorLabel(args: {
@@ -904,7 +910,12 @@ function RequestConfirmationResolution({
   if (interaction.status === "accepted") {
     return (
       <div className="flex flex-wrap items-center gap-2 text-sm leading-6 text-foreground">
-        <span className="font-medium">Confirmed</span>
+        <span className="font-medium">
+          {interaction.payload.approvalStage === "primary"
+          || (interaction.payload.requiresSecondReview && interaction.payload.approvalStage !== "final")
+            ? "Primary review approved"
+            : "Confirmed"}
+        </span>
         <RequestConfirmationTargetChip interaction={interaction} target={target} />
       </div>
     );
@@ -1044,6 +1055,11 @@ function RequestConfirmationCard({
     <div className="space-y-4">
       {interaction.status === "pending" ? (
         <div className="space-y-3 rounded-sm border border-border/70 bg-background/75 p-4">
+          {interaction.payload.approvalStage === "final" ? (
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+              Final approval required
+            </div>
+          ) : null}
           <div className="text-sm leading-6 text-foreground">
             {interaction.payload.prompt}
           </div>
@@ -1162,6 +1178,7 @@ export function IssueThreadInteractionCard({
   onAcceptInteraction,
   onRejectInteraction,
   onSubmitInteractionAnswers,
+  handoffStatus,
 }: IssueThreadInteractionCardProps) {
   const StatusIcon = statusIcon(interaction.status);
   const styles = statusClasses(interaction.status);
@@ -1182,6 +1199,7 @@ export function IssueThreadInteractionCard({
           userLabelMap,
         })
       : null;
+  const displayHandoffStatus = resolveDisplayHandoffStatus(interaction, handoffStatus);
 
   return (
     <div className={cn("rounded-sm border p-5 shadow-none", styles.shell)}>
@@ -1218,6 +1236,10 @@ export function IssueThreadInteractionCard({
               {interaction.summary}
             </p>
           ) : null}
+          {displayHandoffStatus
+            && shouldShowInteractionHandoffStatus(interaction, displayHandoffStatus)
+            ? <InteractionHandoffStatus status={displayHandoffStatus} />
+            : null}
         </div>
 
         <Tooltip>

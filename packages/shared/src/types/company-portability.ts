@@ -7,6 +7,22 @@ export interface CompanyPortabilityInclude {
   projects: boolean;
   issues: boolean;
   skills: boolean;
+  workflows: boolean;
+}
+
+export interface CompanyPortabilityWorkflowManifestEntry {
+  title: string;
+  description: string | null;
+  adkPath: string;
+  workingDirectory: string | null;
+  command: string | null;
+  model: string | null;
+  promptTemplates?: Array<{
+    label: string;
+    promptMarkdown: string;
+  }>;
+  /** Directory path within the source bundle (e.g. "workflows/content-strategist"). */
+  path: string;
 }
 
 export interface CompanyPortabilityEnvInput {
@@ -164,6 +180,7 @@ export interface CompanyPortabilityManifest {
   skills: CompanyPortabilitySkillManifestEntry[];
   projects: CompanyPortabilityProjectManifestEntry[];
   issues: CompanyPortabilityIssueManifestEntry[];
+  workflows: CompanyPortabilityWorkflowManifestEntry[];
   envInputs: CompanyPortabilityEnvInput[];
 }
 
@@ -191,6 +208,7 @@ export interface CompanyPortabilityExportPreviewResult {
     skills: number;
     projects: number;
     issues: number;
+    workflows: number;
   };
   warnings: string[];
   paperclipExtensionPath: string;
@@ -254,6 +272,14 @@ export interface CompanyPortabilityPreviewIssuePlan {
   reason: string | null;
 }
 
+export interface CompanyPortabilityPreviewWorkflowPlan {
+  title: string;
+  action: "create" | "update" | "skip";
+  plannedTitle: string;
+  existingWorkflowId: string | null;
+  reason: string | null;
+}
+
 export interface CompanyPortabilityPreviewResult {
   include: CompanyPortabilityInclude;
   targetCompanyId: string | null;
@@ -265,6 +291,7 @@ export interface CompanyPortabilityPreviewResult {
     agentPlans: CompanyPortabilityPreviewAgentPlan[];
     projectPlans: CompanyPortabilityPreviewProjectPlan[];
     issuePlans: CompanyPortabilityPreviewIssuePlan[];
+    workflowPlans: CompanyPortabilityPreviewWorkflowPlan[];
   };
   manifest: CompanyPortabilityManifest;
   files: Record<string, CompanyPortabilityFileEntry>;
@@ -300,6 +327,12 @@ export interface CompanyPortabilityImportResult {
     id: string | null;
     action: "created" | "updated" | "skipped";
     name: string;
+    reason: string | null;
+  }[];
+  workflows: {
+    title: string;
+    id: string | null;
+    action: "created" | "updated" | "skipped";
     reason: string | null;
   }[];
   envInputs: CompanyPortabilityEnvInput[];

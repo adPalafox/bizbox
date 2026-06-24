@@ -3,6 +3,7 @@ export const queryKeys = {
     all: ["companies"] as const,
     detail: (id: string) => ["companies", id] as const,
     stats: ["companies", "stats"] as const,
+    awaitingHumanSettings: (id: string) => ["companies", id, "awaiting-human-settings"] as const,
   },
   companySkills: {
     list: (companyId: string) => ["company-skills", companyId] as const,
@@ -54,6 +55,7 @@ export const queryKeys = {
     graph: (id: string) => ["issues", "graph", id] as const,
     comments: (issueId: string) => ["issues", "comments", issueId] as const,
     interactions: (issueId: string) => ["issues", "interactions", issueId] as const,
+    interactionHandoffStatus: (issueId: string) => ["issues", "interaction-handoff-status", issueId] as const,
     feedbackVotes: (issueId: string) => ["issues", "feedback-votes", issueId] as const,
     attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
     documents: (issueId: string) => ["issues", "documents", issueId] as const,
@@ -71,6 +73,12 @@ export const queryKeys = {
     detail: (id: string) => ["routines", "detail", id] as const,
     runs: (id: string) => ["routines", "runs", id] as const,
     activity: (companyId: string, id: string) => ["routines", "activity", companyId, id] as const,
+  },
+  workflows: {
+    list: (companyId: string) => ["workflows", companyId] as const,
+    detail: (id: string) => ["workflows", "detail", id] as const,
+    run: (id: string) => ["workflow-runs", id] as const,
+    activity: (companyId: string, id: string) => ["workflows", "activity", companyId, id] as const,
   },
   executionWorkspaces: {
     list: (companyId: string, filters?: Record<string, string | boolean | undefined>) =>
