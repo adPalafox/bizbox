@@ -1,0 +1,31 @@
+schema: paperclip/v1
+agents:
+  data-gatherer:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+    inputs:
+      env:
+        CLICKUP_API_TOKEN:
+          kind: secret
+          requirement: optional
+        GITHUB_TOKEN:
+          kind: secret
+          requirement: optional
+  reviewer:
+    adapter:
+      type: codex_local
+      config:
+        model: gpt-5.4-mini
+routines:
+  weekly-context-capture:
+    status: active
+    priority: medium
+    concurrencyPolicy: coalesce_if_active
+    catchUpPolicy: skip_missed
+    triggers:
+      - kind: schedule
+        label: Weekly Wednesday 9am
+        cronExpression: "0 9 * * 3"
+        timezone: America/New_York

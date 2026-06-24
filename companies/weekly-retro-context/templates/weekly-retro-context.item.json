@@ -1,0 +1,24 @@
+{
+  "topic_slug": "",
+  "topic_label": "",
+  "window": {
+    "start": "",
+    "end": "",
+    "timezone": ""
+  },
+  "participants": [
+    {
+      "name": "",
+      "source": "",
+      "role": ""
+    }
+  ],
+  "evidence_ids": [],
+  "evidence": [],
+  "insights": [],
+  "source_counts": {
+    "clickup": 0,
+    "github": 0
+  },
+  "summary": ""
+}

@@ -1,0 +1,17 @@
+{
+  "window": {
+    "start": "",
+    "end": "",
+    "timezone": ""
+  },
+  "decisions": [
+    {
+      "topic_slug": "",
+      "topic_label": "",
+      "include": true,
+      "evidence_ids": [],
+      "insights": [],
+      "review_notes": ""
+    }
+  ]
+}

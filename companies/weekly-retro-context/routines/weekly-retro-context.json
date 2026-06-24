@@ -1,0 +1,13 @@
+{
+  "title": "Weekly retro context capture",
+  "projectSlug": "weekly-retro-context",
+  "assigneeAgentSlug": "data-gatherer",
+  "priority": "medium",
+  "status": "active",
+  "concurrencyPolicy": "coalesce_if_active",
+  "catchUpPolicy": "skip_missed",
+  "timezone": "America/New_York",
+  "cronExpression": "0 9 * * 3",
+  "triggerLabel": "Weekly Wednesday 9am",
+  "description": "Collect the prior seven days of ClickUp and GitHub activity, normalize it deterministically, and hand the reviewed output to downstream retro/postmortem workflows."
+}

@@ -1,0 +1,36 @@
+{
+  "pulls": [
+    {
+      "_repository": "acme/app",
+      "number": 42,
+      "title": "Fix flaky onboarding test",
+      "body": "This resolves the regression and removes the intermittent failure.",
+      "state": "closed",
+      "created_at": "2026-06-18T09:00:00Z",
+      "closed_at": "2026-06-19T13:15:00Z",
+      "merged_at": "2026-06-19T13:14:00Z",
+      "html_url": "https://github.com/acme/app/pull/42",
+      "user": {
+        "login": "octocat"
+      },
+      "merged_by": {
+        "login": "maintainer"
+      },
+      "assignees": [
+        {
+          "login": "octocat"
+        }
+      ],
+      "requested_reviewers": [
+        {
+          "login": "reviewer1"
+        }
+      ],
+      "labels": [
+        {
+          "name": "bug"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weekly Retro Context Output",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "topic_slug",
+      "topic_label",
+      "window",
+      "participants",
+      "evidence_ids",
+      "evidence",
+      "insights",
+      "source_counts",
+      "summary"
+    ],
+    "properties": {
+      "topic_slug": { "type": "string", "minLength": 1 },
+      "topic_label": { "type": "string", "minLength": 1 },
+      "window": {
+        "type": "object",
+        "required": ["start", "end", "timezone"],
+        "properties": {
+          "start": { "type": "string", "minLength": 1 },
+          "end": { "type": "string", "minLength": 1 },
+          "timezone": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "participants": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["name", "source", "role"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "minLength": 1 },
+            "role": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "evidence_ids": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "evidence": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["id", "source", "kind", "timestamp", "title"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "source": { "type": "string", "minLength": 1 },
+            "kind": { "type": "string", "minLength": 1 },
+            "timestamp": { "type": "string", "minLength": 1 },
+            "title": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": true
+        }
+      },
+      "insights": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "source_counts": {
+        "type": "object",
+        "required": ["clickup", "github"],
+        "properties": {
+          "clickup": { "type": "integer", "minimum": 0 },
+          "github": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      },
+      "summary": { "type": "string" }
+    },
+    "additionalProperties": false
+  }
+}

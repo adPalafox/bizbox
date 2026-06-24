@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Weekly Retro Context Review",
+  "type": "object",
+  "required": ["window", "decisions"],
+  "properties": {
+    "window": {
+      "type": "object",
+      "required": ["start", "end", "timezone"],
+      "properties": {
+        "start": { "type": "string", "minLength": 1 },
+        "end": { "type": "string", "minLength": 1 },
+        "timezone": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["topic_slug", "topic_label", "include", "evidence_ids", "insights", "review_notes"],
+        "properties": {
+          "topic_slug": { "type": "string", "minLength": 1 },
+          "topic_label": { "type": "string", "minLength": 1 },
+          "include": { "type": "boolean" },
+          "evidence_ids": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "insights": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "review_notes": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

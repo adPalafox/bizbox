@@ -1,0 +1,33 @@
+{
+  "tasks": [
+    {
+      "id": "task-1",
+      "name": "Resolve login blocker",
+      "description": "Blocked on identity config and a missing callback URL.",
+      "status": {
+        "status": "in progress"
+      },
+      "date_created": "2026-06-17T10:00:00-04:00",
+      "date_updated": "2026-06-20T12:30:00-04:00",
+      "date_closed": null,
+      "url": "https://clickup.com/t/task-1",
+      "assignees": [
+        {
+          "id": "person-1",
+          "username": "A. Person",
+          "email": "a.person@example.com"
+        }
+      ],
+      "creator": {
+        "id": "person-2",
+        "username": "B. Person",
+        "email": "b.person@example.com"
+      },
+      "tags": [
+        {
+          "name": "blocked"
+        }
+      ]
+    }
+  ]
+}

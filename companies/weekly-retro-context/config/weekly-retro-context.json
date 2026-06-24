@@ -1,0 +1,58 @@
+{
+  "window": {
+    "timezone": "America/New_York",
+    "lookbackDays": 7
+  },
+  "clickup": {
+    "enabled": true,
+    "baseUrl": "https://api.clickup.com/api/v2",
+    "teamId": "",
+    "listIds": [],
+    "taskPathTemplate": "/list/{listId}/task",
+    "commentPathTemplate": "/task/{taskId}/comment",
+    "pageSize": 100,
+    "includeSubtasks": true,
+    "includeClosed": true
+  },
+  "github": {
+    "enabled": true,
+    "baseUrl": "https://api.github.com",
+    "repositories": [],
+    "pullsPathTemplate": "/repos/{owner}/{repo}/pulls",
+    "reviewsPathTemplate": "/repos/{owner}/{repo}/pulls/{pullNumber}/reviews",
+    "pageSize": 100,
+    "includeReviews": true
+  },
+  "topics": [
+    {
+      "slug": "delivery-blockers",
+      "label": "Delivery blockers",
+      "keywords": ["blocked", "blocker", "dependency", "stalled", "waiting"]
+    },
+    {
+      "slug": "quality-regressions",
+      "label": "Quality and regressions",
+      "keywords": ["bug", "regression", "flake", "failing", "test failure", "fix"]
+    },
+    {
+      "slug": "scope-changes",
+      "label": "Scope changes",
+      "keywords": ["scope", "change request", "pivot", "replan", "reprioritize"]
+    },
+    {
+      "slug": "coordination-dependencies",
+      "label": "Coordination and dependencies",
+      "keywords": ["handoff", "coordination", "dependency", "cross-team", "blocked on"]
+    },
+    {
+      "slug": "wins-progress",
+      "label": "Wins and progress",
+      "keywords": ["shipped", "merged", "done", "complete", "success", "landed"]
+    },
+    {
+      "slug": "general-context",
+      "label": "General context",
+      "keywords": []
+    }
+  ]
+}

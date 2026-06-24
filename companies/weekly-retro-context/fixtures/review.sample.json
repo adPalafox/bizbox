@@ -1,0 +1,22 @@
+{
+  "window": {
+    "start": "2026-06-17T09:00:00-04:00",
+    "end": "2026-06-24T09:00:00-04:00",
+    "timezone": "America/New_York"
+  },
+  "decisions": [
+    {
+      "topic_slug": "quality-regressions",
+      "topic_label": "Quality and regressions",
+      "include": true,
+      "evidence_ids": [
+        "clickup:task-1",
+        "github:acme/app#42"
+      ],
+      "insights": [
+        "A flaky onboarding test and a blocked ClickUp item pointed at the same callback/config gap."
+      ],
+      "review_notes": "Both items support a quality/regression conversation."
+    }
+  ]
+}
